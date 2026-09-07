@@ -1,0 +1,45 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: financial_assistant_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - SECURITY_MODE=${SECURITY_MODE:-local_mock}
+      - GCP_PROJECT_ID=${GCP_PROJECT_ID:-demo-fintech-project}
+      - GCP_LOCATION=${GCP_LOCATION:-us-central1}
+      - VERTEX_MODEL_NAME=${VERTEX_MODEL_NAME:-gemini-1.5-flash-002}
+      - CHECKPOINTER_TYPE=${CHECKPOINTER_TYPE:-memory}
+      - FIRESTORE_COLLECTION=${FIRESTORE_COLLECTION:-financial_assistant_checkpoints}
+      - TOKEN_VAULT_SECRET=${TOKEN_VAULT_SECRET:-development-secret-key-32-chars!}
+    volumes:
+      - ./backend/app:/app/app:ro
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - default
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: financial_assistant_frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+
+networks:
+  default:
+    name: financial_assistant_network

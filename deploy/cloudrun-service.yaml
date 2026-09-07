@@ -1,0 +1,52 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: financial-assistant-backend
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/description: "Backend API para Asistente Financiero Multi-Agente con Defense-in-Depth"
+spec:
+  template:
+    metadata:
+      annotations:
+        # Cost minimization: Scale to 0 instances when idle (zero fixed compute cost)
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "2"
+        # CPU is only allocated during request processing to conserve GCP credits
+        run.googleapis.com/cpu-throttling: "true"
+        # Dedicated Service Account placeholder (configured in deploy/iam-setup.sh)
+        run.googleapis.com/service-account: "sa-financial-assistant@${PROJECT_ID}.iam.gserviceaccount.com"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      containers:
+      - image: gcr.io/${PROJECT_ID}/financial-assistant-backend:latest
+        ports:
+        - name: http1
+          containerPort: 8000
+        resources:
+          limits:
+            cpu: "1000m"
+            memory: "512Mi"
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        - name: SECURITY_MODE
+          value: "gcp_live"
+        - name: GCP_PROJECT_ID
+          value: "${PROJECT_ID}"
+        - name: GCP_LOCATION
+          value: "us-central1"
+        - name: VERTEX_MODEL_NAME
+          value: "gemini-1.5-flash-002"
+        - name: CHECKPOINTER_TYPE
+          value: "firestore"
+        - name: FIRESTORE_COLLECTION
+          value: "langgraph_checkpoints"
+        startupProbe:
+          httpGet:
+            path: /api/health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          failureThreshold: 3

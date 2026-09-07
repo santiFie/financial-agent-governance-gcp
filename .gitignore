@@ -1,0 +1,32 @@
+# Environments and Dependencies
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+build/
+.npm
+*.log
+
+# Secrets and Config
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+service_account.json
+sa-key.json
+
+# IDEs and OS
+.vscode/
+.idea/
+.DS_Store
+*.swp

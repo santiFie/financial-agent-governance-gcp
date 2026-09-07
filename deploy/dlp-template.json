@@ -1,0 +1,44 @@
+{
+  "deidentifyTemplate": {
+    "displayName": "Fintech Banking De-identification Template",
+    "description": "Anonimiza números de tarjetas de crédito, CBUs bancarios y documentos DNI",
+    "deidentifyConfig": {
+      "infoTypeTransformations": {
+        "transformations": [
+          {
+            "infoTypes": [
+              { "name": "CREDIT_CARD_NUMBER" }
+            ],
+            "primitiveTransformation": {
+              "replaceWithInfoTypeConfig": {}
+            }
+          },
+          {
+            "infoTypes": [
+              { "name": "EMAIL_ADDRESS" }
+            ],
+            "primitiveTransformation": {
+              "replaceWithInfoTypeConfig": {}
+            }
+          },
+          {
+            "infoTypes": [
+              { "name": "CBU_BANCARIO" }
+            ],
+            "primitiveTransformation": {
+              "replaceWithInfoTypeConfig": {}
+            }
+          },
+          {
+            "infoTypes": [
+              { "name": "ARGENTINA_DNI" }
+            ],
+            "primitiveTransformation": {
+              "replaceWithInfoTypeConfig": {}
+            }
+          }
+        ]
+      }
+    }
+  }
+}
