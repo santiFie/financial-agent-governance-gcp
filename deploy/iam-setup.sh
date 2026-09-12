@@ -38,77 +38,49 @@ SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 # ------------------------------------------------------------------------------
 # PASO 1: CREAR LA SERVICE ACCOUNT DEDICADA
 # ------------------------------------------------------------------------------
-# TODO [A COMPLETAR POR TI]:
-# Escribe el comando gcloud para crear la service account.
-# Pista:
-#   gcloud iam service-accounts create $SA_NAME \
-#     --description="Service Account para el asistente financiero multi-agente con permisos mínimos" \
-#     --display-name="SA Financial Assistant" \
-#     --project="$PROJECT_ID"
+gcloud iam service-accounts create $SA_NAME \
+  --description="Service Account para el asistente financiero multi-agente con permisos mínimos" \
+  --display-name="SA Financial Assistant" \
+  --project="$PROJECT_ID"
 
-echo "[PASO 1] Creando Service Account dedicada..."
-# >>> ESCRIBE TU COMANDO AQUÍ <<<
-
+echo "[PASO 1] Service Account ya creada..."
 
 
 # ------------------------------------------------------------------------------
 # PASO 2: ASIGNAR ROL PARA CLOUD DLP (SENSITIVE DATA PROTECTION)
 # ------------------------------------------------------------------------------
 # El Sanitizer Agent necesita desidentificar datos mediante Cloud DLP.
-# Rol requerido: roles/dlp.user
-#
-# TODO [A COMPLETAR POR TI]:
-# Asigna el rol 'roles/dlp.user' a la Service Account.
-# Pista:
-#   gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-#     --member="serviceAccount:$SA_EMAIL" \
-#     --role="roles/dlp.user"
-
 echo "[PASO 2] Asignando rol roles/dlp.user..."
-# >>> ESCRIBE TU COMANDO AQUÍ <<<
 
-
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:$SA_EMAIL" \
+  --role="roles/dlp.user"
 
 # ------------------------------------------------------------------------------
 # PASO 3: ASIGNAR ROL PARA VERTEX AI (INVOCACIÓN DE MODELOS GEMINI)
 # ------------------------------------------------------------------------------
 # Los agentes que requieran razonamiento con LLM deben poder invocar endpoints de Vertex AI.
-# Rol requerido: roles/aiplatform.user
-#
-# TODO [A COMPLETAR POR TI]:
-# Asigna el rol 'roles/aiplatform.user' a la Service Account.
-# Pista:
-#   gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-#     --member="serviceAccount:$SA_EMAIL" \
-#     --role="roles/aiplatform.user"
-
 echo "[PASO 3] Asignando rol roles/aiplatform.user..."
-# >>> ESCRIBE TU COMANDO AQUÍ <<<
 
-
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:$SA_EMAIL" \
+  --role="roles/aiplatform.user"
 
 # ------------------------------------------------------------------------------
 # PASO 4: ASIGNAR ROL PARA FIRESTORE (CHECKPOINTER / LECTURA SEGURA)
 # ------------------------------------------------------------------------------
 # Para persistir checkpoints de LangGraph en Firestore.
-# Rol recomendado: roles/datastore.user (o roles/datastore.viewer si es solo lectura)
-#
-# TODO [A COMPLETAR POR TI]:
-# Asigna el rol 'roles/datastore.user' a la Service Account.
-# Pista:
-#   gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-#     --member="serviceAccount:$SA_EMAIL" \
-#     --role="roles/datastore.user"
 
 echo "[PASO 4] Asignando rol roles/datastore.user..."
-# >>> ESCRIBE TU COMANDO AQUÍ <<<
 
-
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:$SA_EMAIL" \
+  --role="roles/datastore.user"
 
 # ------------------------------------------------------------------------------
 # PASO 5: VERIFICACIÓN FINAL
 # ------------------------------------------------------------------------------
 echo "========================================================"
-echo "✅ Para verificar las políticas asignadas a tu Service Account, ejecuta:"
+echo "✅ Para verificar las políticas asignadas a tu Service Account, ejecutar en la terminal:"
 echo "   gcloud projects get-iam-policy $PROJECT_ID --flatten=\"bindings[].members\" --filter=\"bindings.members:$SA_EMAIL\" --format=\"table(bindings.role)\""
 echo "========================================================"
