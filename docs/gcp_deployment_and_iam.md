@@ -1,6 +1,6 @@
 # Despliegue en Google Cloud Platform (GCP) y Guía de Aprendizaje IAM
 
-Esta guía explica cómo desplegar **AegisBank AI** en GCP maximizando la preservación del crédito inicial de $300 USD y detalla el ejercicio práctico de configuración de **IAM bajo el Principio de Menor Privilegio (Least Privilege)**.
+Esta guía explica cómo desplegar **AegisBank AI** en GCP maximizando la preservación del crédito inicial de $300 USD y detalla el ejercicio práctico de configuración de **IAM bajo el Principio de Menor Privilegio (Least Privilege)**. Para consultar las decisiones sobre Firestore, Artifact Registry, cuentas de servicio de CI/CD (`sa-cloud-build`) y resolución de incidencias en Cloud Build, consulta [`docs/gcp_build_and_service_accounts_decisions.md`](file:///home/santi/Documentos/Curso%20Ciberseguridad/gcp-projects/financial_asistent/docs/gcp_build_and_service_accounts_decisions.md).
 
 ---
 
