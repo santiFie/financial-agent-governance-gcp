@@ -1,6 +1,6 @@
 # Guía de Pruebas y Matriz de Evaluación de Tests
 
-Este documento detalla la estructura, propósito, dependencias y comportamiento de la suite de pruebas unitarias y de integración de **AegisBank AI** (`backend/tests`).
+Este documento detalla la estructura, propósito, dependencias y comportamiento de la suite de pruebas unitarias y de integración del **Sistema Multi-Agente Bancario** (`backend/tests`).
 
 ---
 

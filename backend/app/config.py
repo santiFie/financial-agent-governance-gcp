@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # Security & Execution Mode:
     # - "local_mock": Deterministic local regex-based DLP and pattern-based Model Armor.
     # - "gcp_live": Real Cloud DLP API, Vertex AI Gemini, and Firestore.
-    security_mode: Literal["local_mock", "gcp_live"] = "local_mock"
+    security_mode: Literal["local_mock", "gcp_live"] = "gcp_live"
 
     # LLM Provider Configuration:
     # - "mock": Deterministic local rule-based simulation (0 cost, offline, for tests)

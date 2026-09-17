@@ -1,6 +1,6 @@
-# Documento de Arquitectura Técnica - AegisBank AI
+# Documento de Arquitectura Técnica - Sistema Multi-Agente Bancario
 
-Este documento detalla los componentes, decisiones de diseño, contratos de datos y patrones arquitectónicos adoptados en la implementación del **Sistema Multi-Agente Bancario con Defense-in-Depth**.
+Este documento detalla los componentes, decisiones de diseño, contratos de datos y patrones arquitectónicos adoptados en la implementación del **Sistema Multi-Agente Bancario con Políticas de Seguridad y Gobernanza**.
 
 ---
 
@@ -11,7 +11,7 @@ Los sistemas agénticos que delegan operaciones financieras a modelos de lenguaj
 - **Vulnerabilidad a Prompt Injections:** Atacantes pueden manipular el contexto conversacional para forzar acciones arbitrarias.
 - **Fuga de Información Personal (PII):** Enviar datos bancarios sin procesar a nubes de terceros o a modelos viola regulaciones como GDPR, PCI-DSS y normativas bancarias locales.
 
-Para solucionar estos problemas, AegisBank AI adopta el principio de **Defensa en Profundidad (Defense-in-Depth)**: la seguridad reside en la **arquitectura perimetral y determinística del software**, no en las instrucciones del prompt del modelo.
+Para solucionar estos problemas, se busca que la seguridad resida en la **arquitectura perimetral y determinística del software**, no en las instrucciones del prompt del modelo.
 
 ---
 
