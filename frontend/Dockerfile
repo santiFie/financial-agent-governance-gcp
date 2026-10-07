@@ -16,6 +16,9 @@ RUN npm run build
 # ==============================================================================
 FROM nginx:alpine AS runner
 
+# Actualizar paquete vulnerable CVE-2026-93990
+RUN apk update && apk add --no-cache --upgrade expat
+
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
