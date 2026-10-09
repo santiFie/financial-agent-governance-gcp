@@ -11,6 +11,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, Tool
 from app.graph.state import AgentState
 from app.graph.tools.banking_read import get_account_balances, get_recent_transactions
 from app.core.llm import get_chat_model
+from app.core.prompt_manager import prompt_manager
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +65,7 @@ def readonly_agent_node(state: AgentState) -> Dict[str, Any]:
     if llm is not None:
         try:
             llm_with_tools = llm.bind_tools(READONLY_TOOLS)
-            system_prompt = (
-                "Eres un asistente bancario de solo lectura. Tienes acceso a herramientas para consultar saldos "
-                "y últimos movimientos bancarios. Tu identificador de usuario es '{user_id}'. "
-                "Siempre usa las herramientas disponibles para responder con datos precisos. "
-                "Al informar saldos de cuentas, titula la sección con '**Estado de Cuentas y Saldos Disponibles**'. "
-                "No tienes permisos de escritura ni para realizar transferencias directas."
-            ).format(user_id=user_id)
+            system_prompt = prompt_manager.render("readonly_agent", user_id=user_id)
 
             messages = [
                 SystemMessage(content=system_prompt),

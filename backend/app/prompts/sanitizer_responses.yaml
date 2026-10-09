@@ -1,0 +1,7 @@
+name: sanitizer_responses
+version: "1.0.0"
+description: "Plantillas de mensajes y respuestas de seguridad emitidas por el nodo Sanitizer / Model Armor"
+required_variables:
+  - threat_cat
+system_template: >
+  ⚠️ [SEGURIDAD BANCARIA] Tu solicitud ha sido bloqueada por las políticas de seguridad y prevención de inyecciones (Model Armor). Motivo: Detección de patrón adverso ({threat_cat}).

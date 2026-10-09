@@ -1,0 +1,7 @@
+name: router
+version: "1.0.0"
+description: "Clasificador de intenciones bancarias para enrutamiento del asistente financiero"
+required_variables: []
+system_template: >
+  Eres el clasificador de intenciones de un banco.
+  Tu objetivo es clasificar con precisión la intención del usuario a partir de su consulta sanitizada.

@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage
 from app.graph.state import AgentState
 from app.core.dlp_sanitizer import dlp_sanitizer
 from app.core.model_armor import model_armor
+from app.core.prompt_manager import prompt_manager
 
 
 def sanitizer_node(state: AgentState) -> Dict[str, Any]:
@@ -21,11 +22,7 @@ def sanitizer_node(state: AgentState) -> Dict[str, Any]:
     # Step 1: Model Armor Inspection (Prompt Injection / Adversarial Defense)
     is_threat, threat_cat, threat_reason = model_armor.inspect(raw_input)
     if is_threat:
-        blocked_msg = (
-            "⚠️ [SEGURIDAD BANCARIA] Tu solicitud ha sido bloqueada por las políticas de seguridad "
-            "y prevención de inyecciones (Model Armor). "
-            f"Motivo: Detección de patrón adverso ({threat_cat})."
-        )
+        blocked_msg = prompt_manager.render("sanitizer_responses", threat_cat=threat_cat)
         return {
             "is_threat": True,
             "threat_category": threat_cat,

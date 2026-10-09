@@ -11,6 +11,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from app.graph.state import AgentState
 from app.core.llm import get_chat_model
+from app.core.prompt_manager import prompt_manager
 
 
 class IntentClassification(BaseModel):
@@ -38,10 +39,7 @@ def router_node(state: AgentState) -> Dict[str, Any]:
 
     llm = get_chat_model(temperature=0.0)
     structured_llm = llm.with_structured_output(IntentClassification)
-    system_prompt = (
-        "Eres el clasificador de intenciones de un banco. "
-        "Tu objetivo es clasificar con precisión la intención del usuario a partir de su consulta sanitizada."
-    )
+    system_prompt = prompt_manager.render("router")
     result = structured_llm.invoke([
         SystemMessage(content=system_prompt),
         HumanMessage(content=sanitized_text)

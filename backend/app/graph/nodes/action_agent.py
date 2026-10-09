@@ -13,6 +13,7 @@ from app.db.mock_banking import mock_banking_db
 from app.core.security_context import token_vault
 from app.graph.tools.banking_write import stage_transfer_request
 from app.core.llm import get_chat_model
+from app.core.prompt_manager import prompt_manager
 
 ACTION_TOOLS = [stage_transfer_request]
 
@@ -36,14 +37,12 @@ def action_agent_node(state: AgentState) -> Dict[str, Any]:
     llm = get_chat_model(temperature=0.0)
 
     llm_with_tools = llm.bind_tools(ACTION_TOOLS)
-    system_prompt = (
-        "Eres un agente bancario transaccional de alta seguridad. "
-        "Tu responsabilidad es analizar la solicitud de transferencia del usuario y llamar a la herramienta "
-        "`stage_transfer_request` con los parámetros correspondientes: "
-        "session_id='{session_id}', user_id='{user_id}', amount (número flotante), "
-        "source_account_id='{source_acc}', target_token (el token seguro anonimizado presente en el texto, ej: [CBU_BANCARIO_1]). "
-        "Nunca omitas la llamada a la herramienta para encolar la transferencia."
-    ).format(session_id=session_id, user_id=user_id, source_acc=source_acc)
+    system_prompt = prompt_manager.render(
+        "action_agent",
+        session_id=session_id,
+        user_id=user_id,
+        source_acc=source_acc
+    )
 
     ai_msg = llm_with_tools.invoke([
         SystemMessage(content=system_prompt),
