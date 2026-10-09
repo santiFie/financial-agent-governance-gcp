@@ -21,6 +21,7 @@ from app.models.api_schemas import (
 )
 from app.graph.graph import financial_graph
 from app.db.mock_banking import mock_banking_db
+from app.core.telemetry import build_trace_config, get_telemetry_status
 
 app = FastAPI(
     title=settings.app_name,
@@ -46,7 +47,8 @@ def health_check():
         "environment": settings.environment,
         "security_mode": settings.security_mode,
         "checkpointer": settings.checkpointer_type,
-        "gcp_project": settings.gcp_project_id
+        "gcp_project": settings.gcp_project_id,
+        "telemetry": get_telemetry_status()
     }
 
 
@@ -60,7 +62,12 @@ async def chat_endpoint(request: ChatRequest):
     session_id = request.session_id
     user_id = request.user_id or "user_default_01"
 
-    config = {"configurable": {"thread_id": session_id}}
+    config, trace_id = build_trace_config(
+        session_id=session_id,
+        user_id=user_id,
+        endpoint="/api/chat",
+        run_name="financial_assistant_chat_turn"
+    )
 
     initial_state = {
         "messages": [HumanMessage(content=request.message)],
@@ -96,7 +103,8 @@ async def chat_endpoint(request: ChatRequest):
         prompt_injection_flagged=state_values.get("is_threat", False),
         threat_category=state_values.get("threat_category"),
         defense_action=state_values.get("defense_action", "PASSED"),
-        processing_time_ms=elapsed_ms
+        processing_time_ms=elapsed_ms,
+        trace_id=trace_id
     )
 
     # Check if graph paused at a Human-in-the-Loop breakpoint
@@ -157,7 +165,18 @@ async def approve_endpoint(request: ApproveRequest):
     Human-in-the-Loop Resumption Endpoint.
     Authorizes or rejects a paused transfer and resumes the LangGraph execution.
     """
-    config = {"configurable": {"thread_id": request.session_id}}
+    config, trace_id = build_trace_config(
+        session_id=request.session_id,
+        user_id=request.admin_user,
+        endpoint="/api/approve",
+        run_name="financial_assistant_hitl_resumption",
+        extra_metadata={
+            "transaction_id": request.transaction_id,
+            "decision": request.decision,
+            "admin_user": request.admin_user
+        },
+        extra_tags=["hitl-approval"]
+    )
     graph_state = financial_graph.get_state(config)
 
     if not graph_state or not graph_state.next:

@@ -19,6 +19,7 @@ build/
 # Secrets and Config
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 credentials.json
@@ -30,3 +31,4 @@ sa-key.json
 .idea/
 .DS_Store
 *.swp
+.worktrees/

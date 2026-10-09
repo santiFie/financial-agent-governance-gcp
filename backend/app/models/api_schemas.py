@@ -26,6 +26,7 @@ class SecurityMetadata(BaseModel):
     threat_category: Optional[str] = None
     defense_action: Literal["PASSED", "DEIDENTIFIED", "BLOCKED"] = "PASSED"
     processing_time_ms: float = 0.0
+    trace_id: Optional[str] = Field(default=None, description="Observability trace ID (LangSmith/Langfuse) for auditing")
 
 
 class PendingTransferInfo(BaseModel):

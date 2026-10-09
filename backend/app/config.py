@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     # Secret key for the reversible token vault (never leaked to LLM)
     token_vault_secret: str = "super-secret-vault-key-change-in-prod-32bytes!"
 
+    # Observability & Tracing (LangSmith / Langfuse)
+    langchain_tracing_v2: bool = False
+    langchain_api_key: Optional[str] = os.getenv("LANGCHAIN_API_KEY")
+    langchain_project: str = "financial-assistant-agents"
+    langchain_endpoint: str = "https://api.smith.langchain.com"
+
     # Server binding
     backend_host: str = "0.0.0.0"
     backend_port: int = 8000
@@ -59,3 +65,10 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Automatically propagate LangSmith settings to environment if tracing is active
+if settings.langchain_tracing_v2 and settings.langchain_api_key:
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+    os.environ["LANGCHAIN_API_KEY"] = settings.langchain_api_key
+    os.environ["LANGCHAIN_PROJECT"] = settings.langchain_project
+    os.environ["LANGCHAIN_ENDPOINT"] = settings.langchain_endpoint
