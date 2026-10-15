@@ -1,6 +1,6 @@
 """
 Read-Only DB Agent Node.
-Executes read queries on banking data (balances, statements).
+Executes read queries on banking data (balances, statements, scoring, financial summary).
 Binds read-only tools to the LLM (Principle of Least Privilege).
 Has ZERO write permissions to the database or transfer systems.
 """
@@ -9,50 +9,31 @@ import logging
 from typing import Dict, Any, List
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from app.graph.state import AgentState
-from app.graph.tools.banking_read import get_account_balances, get_recent_transactions
+from app.graph.tools.banking_read import (
+    get_account_balance,
+    get_account_balances,
+    get_recent_transactions,
+    get_transaction_history,
+    get_credit_scoring,
+    get_financial_summary,
+)
 from app.core.llm import get_chat_model
 
 logger = logging.getLogger(__name__)
 
-READONLY_TOOLS = [get_account_balances, get_recent_transactions]
+READONLY_TOOLS = [
+    get_account_balance,
+    get_account_balances,
+    get_recent_transactions,
+    get_transaction_history,
+    get_credit_scoring,
+    get_financial_summary,
+]
 TOOL_MAP = {t.name: t for t in READONLY_TOOLS}
-
-
-def _execute_readonly_mock(intent: str, user_id: str) -> str:
-    """Deterministic fallback formatting."""
-    if intent == "balance":
-        accounts = get_account_balances.invoke({"user_id": user_id})
-        acc_details = "\n".join([
-            f"• **Cuenta {acc['account_number']}** ({acc['owner_name']}): "
-            f"**${acc['balance']:,.2f} {acc['currency']}**"
-            for acc in accounts
-        ])
-        return (
-            f"🏦 **Estado de Cuentas y Saldos Disponibles:**\n\n"
-            f"{acc_details}\n\n"
-            "¿Deseas realizar alguna otra consulta o ver tus últimos movimientos?"
-        )
-    elif intent == "transactions":
-        txs = get_recent_transactions.invoke({"user_id": user_id, "limit": 5})
-        tx_details = "\n".join([
-            f"• [{tx['timestamp'][:10]}] **{tx['type']}**: ${tx['amount']:,.2f} - *{tx['description']}*"
-            for tx in txs
-        ])
-        return (
-            f"📜 **Últimos 5 Movimientos Bancarios:**\n\n"
-            f"{tx_details}\n\n"
-            "Todos tus movimientos se encuentran conciliados y protegidos."
-        )
-    else:
-        return (
-            "ℹ️ Bienvenido al Asistente Financiero Seguro. "
-            "Puedes consultarme tus saldos, tus últimos movimientos o solicitar una transferencia bancaria."
-        )
-
 
 def readonly_agent_node(state: AgentState) -> Dict[str, Any]:
     """
-    Handles read-only requests (balance or transaction history)
+    Handles read-only requests (balance, transactions, scoring, summary)
     adhering to the Principle of Least Privilege by binding only read tools.
     """
     intent = state.get("current_intent", "balance")
@@ -70,10 +51,11 @@ def readonly_agent_node(state: AgentState) -> Dict[str, Any]:
         try:
             llm_with_tools = llm.bind_tools(READONLY_TOOLS)
             system_prompt = (
-                "Eres un asistente bancario de solo lectura. Tienes acceso a herramientas para consultar saldos "
-                "y últimos movimientos bancarios. Tu identificador de usuario es '{user_id}'. "
+                "Eres un asistente bancario de solo lectura. Tienes acceso a herramientas para consultar saldos, "
+                "movimientos bancarios, scoring crediticio y resumen financiero consolidado. Tu identificador de usuario es '{user_id}'. "
                 "Siempre usa las herramientas disponibles para responder con datos precisos. "
                 "Al informar saldos de cuentas, titula la sección con '**Estado de Cuentas y Saldos Disponibles**'. "
+                "Al presentar el resumen financiero, titula la sección con '**Resumen Financiero Consolidado**'. "
                 "No tienes permisos de escritura ni para realizar transferencias directas."
             ).format(user_id=user_id)
 
@@ -130,12 +112,10 @@ def readonly_agent_node(state: AgentState) -> Dict[str, Any]:
                 }
 
         except Exception as e:
-            logger.warning(f"[ReadOnlyAgent] Error invoking LLM with tools: {e}. Using deterministic fallback.")
+            logger.warning(f"[ReadOnlyAgent] Error invoking LLM with tools: {e}.")
 
-    # Fallback to deterministic read
-    content = _execute_readonly_mock(intent, user_id)
     return {
-        "final_response": content,
+        "final_response": "Error when processing your request. Please try again.",
         "status": "COMPLETED",
-        "messages": [AIMessage(content=content)]
+        "messages": [AIMessage(content="Error when processing your request. Please try again.")]
     }

@@ -1,6 +1,8 @@
 # Environments and Dependencies
 .venv
 .venv/
+.venv
+backend/.venv
 venv/
 ENV/
 env/
@@ -16,6 +18,8 @@ dist/
 build/
 .npm
 *.log
+*.db
+*.sqlite3
 
 # Secrets and Config
 .env
