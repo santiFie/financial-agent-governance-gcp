@@ -9,6 +9,9 @@ python-multipart>=0.0.9
 langgraph>=0.2.14
 langchain-core>=0.3.0
 
+# MCP (Model Context Protocol)
+mcp<2
+
 # Google Cloud Services
 google-cloud-dlp>=3.18.0
 google-cloud-firestore>=2.16.0
