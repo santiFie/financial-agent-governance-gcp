@@ -7,7 +7,8 @@ from langchain_core.messages import AIMessage, ToolCall
 
 from app.config import settings
 from app.core.llm import get_chat_model
-from app.graph.nodes.router import router_node, IntentClassification
+from app.graph.nodes.planner import planner_node
+from app.graph.schemas import Plan, Task
 from app.graph.nodes.readonly_agent import readonly_agent_node
 from app.graph.nodes.action_agent import action_agent_node
 
@@ -28,20 +29,32 @@ def test_get_chat_model_missing_groq_key_falls_back():
                 assert model is None
 
 
-def test_router_node_uses_llm_structured_output():
-    """Router node uses LLM structured output when available."""
+def test_planner_agent_node_uses_llm_structured_output():
+    """Planner Agent node uses LLM structured output when available."""
     mock_llm = MagicMock()
     mock_structured = MagicMock()
-    mock_structured.invoke.return_value = IntentClassification(intent="transfer")
+    mock_structured.invoke.return_value = Plan(
+        steps=[
+            Task(
+                id=1,
+                dependencies=[],
+                description="Transferir fondos al destinatario",
+                assigned_tool="Transfer_API"
+            )
+        ]
+    )
     mock_llm.with_structured_output.return_value = mock_structured
 
-    with patch("app.graph.nodes.router.get_chat_model", return_value=mock_llm):
+    with patch("app.graph.nodes.planner.get_chat_model", return_value=mock_llm):
         state = {
             "sanitized_input": "Quisiera mandar dinero a un familiar",
             "is_threat": False
         }
-        res = router_node(state)
+        res = planner_node(state)
         assert res["current_intent"] == "transfer"
+        assert res["plan_completed"] is False
+        assert len(res["plan"]) == 1
+        assert res["plan"][0]["assigned_tool"] == "Transfer_API"
         mock_structured.invoke.assert_called_once()
 
 
