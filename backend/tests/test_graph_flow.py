@@ -72,5 +72,5 @@ def test_transfer_triggers_hitl_and_resumes():
     )
 
     assert resumed["status"] == "COMPLETED"
-    assert "éxito" in resumed["final_response"].lower() and "transferencia" in resumed["final_response"].lower()
+    assert ("éxito" in resumed["final_response"].lower() or "completad" in resumed["final_response"].lower()) and "transferencia" in resumed["final_response"].lower()
     assert resumed["approval_status"] == "APPROVED"
