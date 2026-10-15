@@ -61,6 +61,11 @@ def readonly_agent_node(state: AgentState) -> Dict[str, Any]:
 
     llm = get_chat_model(temperature=0.0)
 
+    plan = state.get("plan")
+    idx = state.get("current_task_idx", state.get("current_step_index", 0))
+    task_desc = plan[idx].get("description") if plan and 0 <= idx < len(plan) else None
+    query_text = task_desc or sanitized_text or f"Consultar {intent}"
+
     if llm is not None:
         try:
             llm_with_tools = llm.bind_tools(READONLY_TOOLS)
@@ -74,7 +79,7 @@ def readonly_agent_node(state: AgentState) -> Dict[str, Any]:
 
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=sanitized_text or f"Consultar {intent}")
+                HumanMessage(content=query_text)
             ]
 
             ai_msg = llm_with_tools.invoke(messages)

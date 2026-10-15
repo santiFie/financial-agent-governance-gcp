@@ -40,8 +40,13 @@ class Settings(BaseSettings):
 
     # LangGraph Checkpointer
     # - "memory": MemorySaver (zero external dependency, ideal for local tests)
+    # - "postgres": PostgreSQL PostgresSaver (fault-tolerant, resilient production checkpointer)
     # - "firestore": Cloud Firestore (scalable, zero idle cost in GCP Free Tier)
-    checkpointer_type: Literal["memory", "firestore"] = "memory"
+    checkpointer_type: Literal["memory", "postgres", "firestore"] = "postgres"
+    postgres_uri: str = os.getenv(
+        "POSTGRES_URI",
+        "postgresql://postgres:postgres@localhost:5432/financial_assistant"
+    )
     firestore_collection: str = "langgraph_checkpoints"
 
     # Secret key for the reversible token vault (never leaked to LLM)

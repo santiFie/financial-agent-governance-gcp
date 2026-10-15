@@ -25,6 +25,9 @@ Un asistente bancario y fintech inteligente diseñado bajo el paradigma de **Gob
 5. **Optimización de Costos en GCP**:
    - Despliegue en **Cloud Run** con escalado a 0 instancias (`--min-instances=0`), consumiendo cómputo solo durante las peticiones activas.
    - Checkpointer en **Firestore Native**, que aprovecha el nivel gratuito perpetuo (1 GB y 50.000 lecturas/día) evitando los costos fijos de Cloud SQL.
+6. **Orquestación Adaptativa (Planner + Replanner)**:
+   - Formulación de planes de ejecución estructurados (`Plan` con lista ordenada de `Task` y dependencias) mediante LLM con salida estructurada, sin fallbacks deterministas hardcodeados.
+   - Supervisión continua mediante un **Replanner Agent** que analiza resultados parciales, optimiza la ventana de contexto (`ContextOptimizer`) y decide dinámicamente si continuar (`CONTINUE`), replanificar (`REPLAN`) o finalizar (`FINISH`).
 
 ---
 
@@ -43,10 +46,14 @@ Un asistente bancario y fintech inteligente diseñado bajo el paradigma de **Gob
              │ ¿Es Amenaza?                          │ Texto Sanitizado
              ▼                                       ▼
     ┌─────────────────┐                     ┌─────────────────┐
-    │  Bloqueo Seguro │                     │  ROUTER AGENT   │
-    │   (Status 403)  │                     │  (Clasificador) │
+    │  Bloqueo Seguro │                     │  PLANNER AGENT  │
+    │   (Status 403)  │                     │ (Plan Inicial)  │
     └─────────────────┘                     └────────┬────────┘
                                                      │
+                                                     ▼
+                                        ┌─────────────────────────┐
+                                        │    route_to_executor    │
+                                        └────────────┬────────────┘
                          ┌───────────────────────────┴───────────────────────────┐
                          ▼                                                       ▼
                ┌───────────────────┐                                   ┌───────────────────┐
@@ -66,8 +73,19 @@ Un asistente bancario y fintech inteligente diseñado bajo el paradigma de **Gob
                          │                                              │ Reanudación y   │
                          │                                              │  Débito en DB   │
                          │                                              └────────┬────────┘
-                         ▼                                                       ▼
-                      [ FIN ] <──────────────────────────────────────────────────┘
+                         │                                                       │
+                         └───────────────────────────┬───────────────────────────┘
+                                                     │
+                                                     ▼
+                                            ┌─────────────────┐
+                                            │ REPLANNER AGENT │ ◄── [Evalúa feedback]
+                                            │ (Decisión LLM)  │ ──► [ContextOptimizer]
+                                            └────────┬────────┘
+                                                     │
+                               ┌─────────────────────┴─────────────────────┐
+                               │ ¿CONTINUE / REPLAN?                       │ ¿FINISH / Rechazo HITL?
+                               ▼                                           ▼
+                      (Siguiente Ejecutor)                              [ FIN ]
 ```
 
 ---
