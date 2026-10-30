@@ -64,13 +64,53 @@ class DLPSanitizer:
         detected: List[DetectedPII] = []
         counters: Dict[str, int] = {}
 
+        # Pre-populate seen mappings from session's TokenVault if present
+        session_tokens = token_vault.get_all_session_tokens(session_id)
+        seen_cbus: Dict[str, str] = {
+            val: tok for tok, val in session_tokens.items() if tok.startswith("[CBU_BANCARIO_")
+        }
+        for tok in seen_cbus.values():
+            m_num = re.search(r"\d+", tok)
+            if m_num:
+                counters["CBU"] = max(counters.get("CBU", 0), int(m_num.group(0)))
+
+        seen_cards: Dict[str, str] = {
+            val: tok for tok, val in session_tokens.items() if tok.startswith("[TARJETA_CREDITO_")
+        }
+        for tok in seen_cards.values():
+            m_num = re.search(r"\d+", tok)
+            if m_num:
+                counters["CARD"] = max(counters.get("CARD", 0), int(m_num.group(0)))
+
+        seen_dnis: Dict[str, str] = {
+            val: tok for tok, val in session_tokens.items() if tok.startswith("[DNI_")
+        }
+        for tok in seen_dnis.values():
+            m_num = re.search(r"\d+", tok)
+            if m_num:
+                counters["DNI"] = max(counters.get("DNI", 0), int(m_num.group(0)))
+
+        seen_emails: Dict[str, str] = {
+            val.lower(): tok for tok, val in session_tokens.items() if tok.startswith("[EMAIL_")
+        }
+        for tok in seen_emails.values():
+            m_num = re.search(r"\d+", tok)
+            if m_num:
+                counters["EMAIL"] = max(counters.get("EMAIL", 0), int(m_num.group(0)))
+
         # 1. CBU Check (exact 22 digits)
         cbu_matches = list(re.finditer(r"\b\d{22}\b", sanitized_text))
+        for m in sorted(cbu_matches, key=lambda m: m.start()):
+            raw_cbu = m.group(0)
+            if raw_cbu not in seen_cbus:
+                counters["CBU"] = counters.get("CBU", 0) + 1
+                token = f"[CBU_BANCARIO_{counters['CBU']}]"
+                token_vault.store_token(session_id, token, raw_cbu)
+                seen_cbus[raw_cbu] = token
+
         for match in sorted(cbu_matches, key=lambda m: m.start(), reverse=True):
             raw_cbu = match.group(0)
-            counters["CBU"] = counters.get("CBU", 0) + 1
-            token = f"[CBU_BANCARIO_{counters['CBU']}]"
-            token_vault.store_token(session_id, token, raw_cbu)
+            token = seen_cbus[raw_cbu]
             sanitized_text = sanitized_text[:match.start()] + token + sanitized_text[match.end():]
             detected.append(DetectedPII(
                 info_type="CBU_BANCARIO",
@@ -81,13 +121,21 @@ class DLPSanitizer:
 
         # 2. Credit Card Check (13 to 16 digits with optional spaces or dashes)
         card_matches = list(re.finditer(r"\b(?:\d[ -]*?){13,16}\b", sanitized_text))
+        for m in sorted(card_matches, key=lambda m: m.start()):
+            raw_matched = m.group(0)
+            clean_digits = re.sub(r"[\s-]", "", raw_matched)
+            if 13 <= len(clean_digits) <= 16 and not raw_matched.startswith("["):
+                if clean_digits not in seen_cards:
+                    counters["CARD"] = counters.get("CARD", 0) + 1
+                    token = f"[TARJETA_CREDITO_{counters['CARD']}]"
+                    token_vault.store_token(session_id, token, clean_digits)
+                    seen_cards[clean_digits] = token
+
         for match in sorted(card_matches, key=lambda m: m.start(), reverse=True):
             raw_matched = match.group(0)
             clean_digits = re.sub(r"[\s-]", "", raw_matched)
-            if 13 <= len(clean_digits) <= 16 and not raw_matched.startswith("["):
-                counters["CARD"] = counters.get("CARD", 0) + 1
-                token = f"[TARJETA_CREDITO_{counters['CARD']}]"
-                token_vault.store_token(session_id, token, clean_digits)
+            if 13 <= len(clean_digits) <= 16 and not raw_matched.startswith("[") and clean_digits in seen_cards:
+                token = seen_cards[clean_digits]
                 sanitized_text = sanitized_text[:match.start()] + token + sanitized_text[match.end():]
                 detected.append(DetectedPII(
                     info_type="CREDIT_CARD_NUMBER",
@@ -98,13 +146,19 @@ class DLPSanitizer:
 
         # 3. DNI Check (7 or 8 digits, optionally preceded by DNI keyword)
         dni_matches = list(re.finditer(r"(?i)\b(?:dni\s*[:#]?\s*|\b)(\d{7,8})\b", sanitized_text))
+        for m in sorted(dni_matches, key=lambda m: m.start()):
+            raw_dni = m.group(1)
+            if not m.group(0).startswith("["):
+                if raw_dni not in seen_dnis:
+                    counters["DNI"] = counters.get("DNI", 0) + 1
+                    token = f"[DNI_{counters['DNI']}]"
+                    token_vault.store_token(session_id, token, raw_dni)
+                    seen_dnis[raw_dni] = token
+
         for match in sorted(dni_matches, key=lambda m: m.start(), reverse=True):
             raw_dni = match.group(1)
-            # Avoid replacing already replaced tokens
-            if not match.group(0).startswith("["):
-                counters["DNI"] = counters.get("DNI", 0) + 1
-                token = f"[DNI_{counters['DNI']}]"
-                token_vault.store_token(session_id, token, raw_dni)
+            if not match.group(0).startswith("[") and raw_dni in seen_dnis:
+                token = seen_dnis[raw_dni]
                 sanitized_text = sanitized_text[:match.start(1)] + token + sanitized_text[match.end(1):]
                 detected.append(DetectedPII(
                     info_type="ARGENTINA_DNI",
@@ -115,18 +169,27 @@ class DLPSanitizer:
 
         # 4. Email check
         email_matches = list(re.finditer(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b", sanitized_text))
+        for m in sorted(email_matches, key=lambda m: m.start()):
+            raw_email = m.group(0)
+            email_key = raw_email.lower()
+            if email_key not in seen_emails:
+                counters["EMAIL"] = counters.get("EMAIL", 0) + 1
+                token = f"[EMAIL_{counters['EMAIL']}]"
+                token_vault.store_token(session_id, token, raw_email)
+                seen_emails[email_key] = token
+
         for match in sorted(email_matches, key=lambda m: m.start(), reverse=True):
             raw_email = match.group(0)
-            counters["EMAIL"] = counters.get("EMAIL", 0) + 1
-            token = f"[EMAIL_{counters['EMAIL']}]"
-            token_vault.store_token(session_id, token, raw_email)
-            sanitized_text = sanitized_text[:match.start()] + token + sanitized_text[match.end():]
-            detected.append(DetectedPII(
-                info_type="EMAIL_ADDRESS",
-                token_assigned=token,
-                start_offset=match.start(),
-                end_offset=match.end()
-            ))
+            email_key = raw_email.lower()
+            if email_key in seen_emails:
+                token = seen_emails[email_key]
+                sanitized_text = sanitized_text[:match.start()] + token + sanitized_text[match.end():]
+                detected.append(DetectedPII(
+                    info_type="EMAIL_ADDRESS",
+                    token_assigned=token,
+                    start_offset=match.start(),
+                    end_offset=match.end()
+                ))
 
         return sanitized_text, detected
 
