@@ -4,7 +4,7 @@ Implements data storage for bank accounts, transactions, and staged transfers.
 Enforces separation between Read-Only queries and Authorized Write operations.
 """
 from typing import Dict, List, Optional, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 
@@ -196,6 +196,63 @@ class MockBankingDB:
         record["updated_at"] = datetime.utcnow().isoformat()
         return record
 
+    def execute_direct_transfer(
+        self,
+        session_id: str,
+        user_id: str,
+        source_acc: str,
+        dest_acc: str,
+        amount: float,
+        concept: str = "Transferencia directa (Fast-Path PEP)"
+    ) -> Dict[str, Any]:
+        """
+        Executes an immediate direct transfer without requiring pre-staged transfer ID.
+        Used for transactions authorized by PEP Fast-Path governance.
+        """
+        source_account = self.accounts.get(source_acc)
+        if not source_account:
+            raise ValueError(f"Cuenta de origen '{source_acc}' no existe.")
+        if source_account.owner_id != user_id:
+            raise ValueError(f"El usuario '{user_id}' no es titular de la cuenta '{source_acc}'.")
+        if source_account.balance < float(amount):
+            raise ValueError(
+                f"Fondos insuficientes. Saldo disponible: ${source_account.balance:,.2f}, "
+                f"Monto requerido: ${float(amount):,.2f}."
+            )
+
+        source_account.balance = round(source_account.balance - float(amount), 2)
+        if dest_acc in self.accounts:
+            self.accounts[dest_acc].balance = round(self.accounts[dest_acc].balance + float(amount), 2)
+
+        tx_id = f"tx_fast_{uuid.uuid4().hex[:8]}"
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        ledger_tx = Transaction(
+            tx_id=tx_id,
+            account_id=source_account.account_id,
+            tx_type="DEBIT",
+            amount=float(amount),
+            description=f"{concept} a {dest_acc}",
+            timestamp=now_iso
+        )
+        self.transactions.insert(0, ledger_tx)
+
+        return {
+            "status": "EXECUTED",
+            "transaction_id": tx_id,
+            "session_id": session_id,
+            "user_id": user_id,
+            "source_account": source_acc,
+            "dest_acc": dest_acc,
+            "target_account": dest_acc,
+            "debited_amount": float(amount),
+            "amount": float(amount),
+            "remaining_balance": source_account.balance,
+            "currency": source_account.currency,
+            "timestamp": now_iso
+        }
+
 
 # Global singleton mock core banking instance
 mock_banking_db = MockBankingDB()
+
