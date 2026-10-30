@@ -5,6 +5,7 @@ Uses pydantic-settings to manage environment variables with strong typing.
 import os
 from typing import Literal, Optional
 from dotenv import load_dotenv
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 load_dotenv()
@@ -56,6 +57,20 @@ class Settings(BaseSettings):
     # Server binding
     backend_host: str = "0.0.0.0"
     backend_port: int = 8000
+
+    # Document Ingestion Configuration
+    use_gcs_ingestion: bool = Field(default=False, description="Enable document ingestion from GCS")
+    gcs_bucket_name: Optional[str] = Field(default=None, description="GCS bucket name for document ingestion")
+    local_docs_dir: str = Field(default="data/documents", description="Local directory for documents")
+
+    # Google Cloud Model Armor Configuration
+    use_gcp_model_armor: bool = Field(default=False, description="Enable GCP Model Armor")
+    model_armor_template_id: Optional[str] = Field(default=None, description="GCP Model Armor template ID")
+
+    # Policy Enforcement Point (PEP) & Policy Decision Point (PDP) Configuration
+    pdp_url: str = Field(default="http://localhost:8000/api/v1/pdp/evaluate", description="Policy Decision Point URL")
+    pdp_timeout_seconds: float = Field(default=3.0, description="PDP request timeout in seconds")
+    pdp_fallback_mode: str = Field(default="deny", description="PDP fallback behavior on timeout/failure")
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -28,12 +28,21 @@ class AgentState(TypedDict):
     threat_reason: Optional[str]
     defense_action: str  # "PASSED" | "DEIDENTIFIED" | "BLOCKED"
 
-    # Routing & Business Logic
-    current_intent: Optional[str]  # "general" | "balance" | "transactions" | "transfer" | "blocked"
+    # Multimodal / Document Ingestion Context (Stream A)
+    document_name: Optional[str] = None
+    raw_document: Optional[str] = None
+    sanitized_document: Optional[str] = None
 
-    # Action / HITL Staging
+    # Routing, Planning & Business Logic (Stream A)
+    current_intent: Optional[str]  # "general" | "balance" | "transactions" | "transfer" | "blocked"
+    execution_plan: Optional[List[Dict[str, Any]]] = None
+    delegated_instructions: Optional[str] = None
+
+    # Action / HITL Staging & Governance (Stream B)
     pending_transfer: Optional[Dict[str, Any]]
     approval_status: Optional[str]  # "NONE" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED"
+    pending_tool_calls: Optional[List[Dict[str, Any]]] = None
+    executed_tools: Optional[List[Dict[str, Any]]] = None
 
     # Final Output to user
     final_response: Optional[str]
