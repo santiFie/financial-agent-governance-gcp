@@ -1,14 +1,17 @@
 """
 Model Armor / Prompt Injection Guardrail.
-Inspects incoming user queries for adversarial attacks, jailbreaks,
+Inspects incoming user queries and attached documents for adversarial attacks, jailbreaks,
 system prompt overrides, and goal hijacking before passing them to the agent graph.
 """
 import re
+import logging
 from typing import Tuple, Optional
 from app.config import settings
 
+logger = logging.getLogger(__name__)
 
-class ModelArmorGuard:
+
+class LocalModelArmorGuard:
     """
     Simulates Google Cloud Model Armor / Guardrail defense.
     Evaluates adversarial inputs deterministically to prevent prompt injection.
@@ -41,5 +44,63 @@ class ModelArmorGuard:
 
         return False, None, None
 
+    def inspect_prompt(self, text: str) -> Tuple[bool, Optional[str], Optional[str]]:
+        """Unified method for prompt inspection."""
+        return self.inspect(text)
 
-model_armor = ModelArmorGuard()
+
+class HybridModelArmorGuard:
+    """
+    Hybrid Model Armor wrapper:
+    - Uses Google Cloud Model Armor via ModelArmorSanitizePromptRunnable when enabled.
+    - Falls back to LocalModelArmorGuard when disabled, offline, or upon client error.
+    """
+
+    def __init__(self):
+        self.local_guard = LocalModelArmorGuard()
+        self._gcp_runnable = None
+        self._initialized = False
+
+    def _get_runnable(self):
+        if not self._initialized:
+            self._initialized = True
+            if settings.use_gcp_model_armor and settings.model_armor_template_id:
+                try:
+                    from langchain_google_community.model_armor import ModelArmorSanitizePromptRunnable
+                    self._gcp_runnable = ModelArmorSanitizePromptRunnable(
+                        project=settings.gcp_project_id,
+                        location=settings.gcp_location,
+                        template_id=settings.model_armor_template_id,
+                    )
+                except Exception as e:
+                    logger.warning(f"No se pudo inicializar GCP Model Armor: {e}. Usando guardrail local.")
+                    self._gcp_runnable = None
+        return self._gcp_runnable
+
+    def inspect(self, text: str) -> Tuple[bool, Optional[str], Optional[str]]:
+        """
+        Inspects input text for security threats using GCP Model Armor or local guardrail.
+        """
+        runnable = self._get_runnable()
+        if runnable is not None:
+            try:
+                res = runnable.invoke(text)
+                if isinstance(res, dict) and res.get("is_threat"):
+                    return True, res.get("threat_category", "MODEL_ARMOR_VIOLATION"), res.get("threat_reason", "GCP Model Armor detected threat")
+                return self.local_guard.inspect(text)
+            except Exception as e:
+                err_msg = str(e).lower()
+                if "violation" in err_msg or "blocked" in err_msg or "threat" in err_msg:
+                    return True, "MODEL_ARMOR_VIOLATION", str(e)
+                logger.warning(f"Error invocando GCP Model Armor: {e}. Realizando fallback local.")
+                return self.local_guard.inspect(text)
+
+        return self.local_guard.inspect(text)
+
+    def inspect_prompt(self, text: str) -> Tuple[bool, Optional[str], Optional[str]]:
+        """Unified method alias for prompt and document inspection."""
+        return self.inspect(text)
+
+
+ModelArmorGuard = HybridModelArmorGuard
+model_armor = HybridModelArmorGuard()
