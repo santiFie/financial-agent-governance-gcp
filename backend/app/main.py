@@ -72,6 +72,7 @@ async def chat_endpoint(request: ChatRequest):
     initial_state = {
         "messages": [HumanMessage(content=request.message)],
         "raw_input": request.message,
+        "document_name": request.document_name,
         "session_id": session_id,
         "user_id": user_id,
         "status": "IN_PROGRESS"
@@ -142,7 +143,9 @@ async def chat_endpoint(request: ChatRequest):
             intent="transfer",
             status="PENDING_APPROVAL",
             security_audit=security_audit,
-            pending_transfer=pending_info
+            pending_transfer=pending_info,
+            document_name=state_values.get("document_name", request.document_name),
+            execution_plan=state_values.get("execution_plan")
         )
 
     # If graph finished normally or was blocked
@@ -155,7 +158,9 @@ async def chat_endpoint(request: ChatRequest):
         intent=state_values.get("current_intent", "general"),
         status="BLOCKED" if is_blocked else "COMPLETED",
         security_audit=security_audit,
-        pending_transfer=None
+        pending_transfer=None,
+        document_name=state_values.get("document_name", request.document_name),
+        execution_plan=state_values.get("execution_plan")
     )
 
 
