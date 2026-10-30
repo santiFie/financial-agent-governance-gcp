@@ -29,6 +29,23 @@ def sanitizer_node(state: AgentState) -> Dict[str, Any]:
     if document_name and not raw_document:
         try:
             raw_document = document_ingestion_service.load_document(document_name)
+        except ValueError as e:
+            logger.warning(f"Intento de path traversal detectado al cargar '{document_name}': {e}")
+            threat_cat = "PATH_TRAVERSAL"
+            threat_reason = f"Path traversal attempt in document_name: {document_name}"
+            blocked_msg = prompt_manager.render("sanitizer_responses", threat_cat=threat_cat)
+            return {
+                "raw_document": None,
+                "sanitized_document": None,
+                "is_threat": True,
+                "threat_category": threat_cat,
+                "threat_reason": threat_reason,
+                "defense_action": "BLOCKED",
+                "current_intent": "blocked",
+                "status": "BLOCKED",
+                "final_response": blocked_msg,
+                "messages": [AIMessage(content=blocked_msg)]
+            }
         except Exception as e:
             logger.warning(f"Error cargando documento '{document_name}': {e}")
             raw_document = None

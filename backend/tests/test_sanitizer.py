@@ -137,3 +137,23 @@ def test_sanitizer_node_blocks_malicious_document():
     assert result["status"] == "BLOCKED"
     assert result["current_intent"] == "blocked"
 
+
+def test_sanitizer_node_blocks_path_traversal():
+    from app.graph.nodes.sanitizer import sanitizer_node
+
+    state = {
+        "raw_input": "Revisar comprobante adjunto",
+        "document_name": "../../etc/passwd",
+        "session_id": "test_sess_traversal",
+        "user_id": "user_default_01"
+    }
+    result = sanitizer_node(state)
+
+    assert result["is_threat"] is True
+    assert result["threat_category"] == "PATH_TRAVERSAL"
+    assert "Path traversal attempt" in result["threat_reason"]
+    assert result["defense_action"] == "BLOCKED"
+    assert result["status"] == "BLOCKED"
+    assert result["current_intent"] == "blocked"
+
+
