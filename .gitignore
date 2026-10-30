@@ -32,3 +32,5 @@ sa-key.json
 .DS_Store
 *.swp
 .worktrees/
+
+.agents/*

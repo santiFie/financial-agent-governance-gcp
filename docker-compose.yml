@@ -40,6 +40,26 @@ services:
     networks:
       - default
 
+  mcp_action_server:
+    build:
+      context: ./mcp_financial_action_server
+      dockerfile: Dockerfile
+    container_name: financial_mcp_action_server
+    ports:
+      - "8001:8001"
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - MCP_SERVER_PORT=8001
+      - DAILY_TRANSFER_LIMIT=1000000.0
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - default
+
 networks:
   default:
     name: financial_assistant_network
