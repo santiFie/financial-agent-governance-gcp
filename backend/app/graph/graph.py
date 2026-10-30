@@ -10,6 +10,7 @@ from app.graph.nodes.sanitizer import sanitizer_node
 from app.graph.nodes.router import router_node
 from app.graph.nodes.readonly_agent import readonly_agent_node
 from app.graph.nodes.action_agent import action_agent_node
+from app.graph.nodes.pep import pep_node
 from app.db.checkpointer import checkpointer
 
 
@@ -42,6 +43,7 @@ def build_financial_graph():
     workflow.add_node("router", router_node)
     workflow.add_node("readonly_agent", readonly_agent_node)
     workflow.add_node("action_agent", action_agent_node)
+    workflow.add_node("pep_node", pep_node)
 
     # 2. Add edges
     workflow.add_edge(START, "sanitizer")
@@ -66,7 +68,9 @@ def build_financial_graph():
     )
 
     workflow.add_edge("readonly_agent", END)
-    workflow.add_edge("action_agent", END)
+    workflow.add_edge("action_agent", "pep_node")
+    workflow.add_edge("pep_node", END)
+
 
     # 3. Compile with Checkpointer
     return workflow.compile(checkpointer=checkpointer)
