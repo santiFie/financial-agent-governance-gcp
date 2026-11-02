@@ -22,17 +22,22 @@ class Settings(BaseSettings):
     security_mode: Literal["local_mock", "gcp_live"] = "gcp_live"
 
     # LLM Provider Configuration:
-    # - "mock": Deterministic local rule-based simulation (0 cost, offline, for tests)
+    # - "litellm": Multi-provider with dynamic fallbacks (groq -> nvidia -> vertexai -> openrouter)
     # - "groq": Ultra-fast free tier on console.groq.com (Llama 3.3 70B)
     # - "nvidia": Free tier on build.nvidia.com (NIM Llama 3.3)
     # - "vertexai": Google Cloud Vertex AI Gemini (uses GCP Cloud Billing / credits)
+    # - "openrouter": OpenRouter API
     # - "google_genai": Google AI Studio free tier via GEMINI_API_KEY
-    llm_provider: Literal["mock", "groq", "nvidia", "vertexai", "google_genai"] = "groq"
+    llm_provider: Literal["litellm", "groq", "nvidia", "vertexai", "openrouter", "google_genai"] = "litellm"
     llm_model: Optional[str] = "llama-3.3-70b-versatile"
+    groq_model: str = "llama-3.3-70b-versatile"
+    nvidia_model: str = "meta/llama-3.3-70b-instruct"
+    openrouter_model: str = "meta-llama/llama-3.3-70b-instruct"
     groq_api_key: Optional[str] = os.getenv("GROQ_API_KEY")
     nvidia_api_key: Optional[str] = os.getenv("NVIDIA_API_KEY")
     gemini_api_key: Optional[str] = os.getenv("GEMINI_API_KEY")
     openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
+    openrouter_api_key: Optional[str] = os.getenv("OPENROUTER_API_KEY")
 
     # Google Cloud Platform configuration
     gcp_project_id: str = "demo-fintech-project"
@@ -71,6 +76,10 @@ class Settings(BaseSettings):
     pdp_url: str = Field(default="http://localhost:8000/api/v1/pdp/evaluate", description="Policy Decision Point URL")
     pdp_timeout_seconds: float = Field(default=3.0, description="PDP request timeout in seconds")
     pdp_fallback_mode: str = Field(default="deny", description="PDP fallback behavior on timeout/failure")
+
+    # Orchestrator Agent safety limits
+    orchestrator_max_plan_steps: int = Field(default=8, description="Maximum number of steps an execution plan may contain")
+    orchestrator_max_tool_iterations: int = Field(default=3, description="Maximum consecutive Orchestrator tool rounds before a plan update")
 
     model_config = SettingsConfigDict(
         env_file=".env",
