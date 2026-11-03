@@ -27,7 +27,7 @@ def _plan_update_msg(new_steps=None, final_answer=None) -> AIMessage:
 def _document_call_msg(document_name="doc.txt") -> AIMessage:
     return AIMessage(
         content="",
-        tool_calls=[{"name": "read_document_tool", "args": {"document_name": document_name}, "id": "call_doc"}],
+        tool_calls=[{"name": "read_document_tool", "args": {"filename": document_name}, "id": "call_doc"}],
     )
 
 
@@ -141,3 +141,13 @@ def test_unknown_tool_is_rejected():
     with patch("app.graph.nodes.router.get_chat_model", return_value=llm):
         with pytest.raises(OrchestratorError):
             router_node({"sanitized_input": "pedido"})
+
+
+def test_context_tells_the_orchestrator_whether_a_document_is_attached():
+    _, bound = _run({"document_name": "recibo.pdf"}, _plan_update_msg())
+    with_doc = bound.invoke.call_args[0][0][1].content
+    _, bound = _run({}, _plan_update_msg())
+    without_doc = bound.invoke.call_args[0][0][1].content
+
+    assert 'available="yes" filename="recibo.pdf"' in with_doc
+    assert 'available="no"' in without_doc

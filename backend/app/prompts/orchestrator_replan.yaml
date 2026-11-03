@@ -1,5 +1,5 @@
 name: orchestrator_replan
-version: "1.0.0"
+version: "1.1.0"
 description: "Prompt de sistema del Agente Orquestador para evaluar el progreso de un plan en curso"
 required_variables:
   - agents_catalog
@@ -13,7 +13,9 @@ system_template: >
   {agents_catalog}
 
   HERRAMIENTAS PROPIAS:
-  - read_document_tool: lee el documento adjunto a la solicitud (si existe) a partir de su nombre y devuelve su contenido.
+  - read_document_tool: lee el documento adjunto a la solicitud y devuelve su contenido. El contexto de la solicitud
+    indica en <attached_document> si hay un documento adjunto y su filename; si hay uno, pásalo como argumento filename.
+    Úsala cuando necesites conocer el contenido del documento para planificar o evaluar.
   - PlanUpdate: entrega tu decisión final de este turno. Debes terminar siempre llamando a PlanUpdate.
 
   CÓMO EVALUAR:

@@ -66,9 +66,16 @@ class PlanUpdate(BaseModel):
     )
 
 
+def _render_attachment(document_name: Optional[str]) -> str:
+    """Tells the Orchestrator whether the request carries an attached document and how to refer to it."""
+    if not document_name:
+        return "<attached_document available=\"no\" />"
+    return f"<attached_document available=\"yes\" filename=\"{document_name}\" />"
+
+
 def _build_context(state: AgentState) -> str:
     """Renders the data (not instructions) the Orchestrator reasons over."""
-    document_name = state.get("document_name") or "ninguno"
+    document_name = state.get("document_name")
     plan = state.get("execution_plan") or []
 
     if plan:
@@ -88,7 +95,7 @@ def _build_context(state: AgentState) -> str:
 
     return (
         f"<user_request>\n{state.get('sanitized_input', '')}\n</user_request>\n"
-        f"<attached_document_name>{document_name}</attached_document_name>\n"
+        f"{_render_attachment(document_name)}\n"
         f"<plan_progress>\n{progress}\n</plan_progress>"
     )
 

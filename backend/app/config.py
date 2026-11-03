@@ -66,7 +66,10 @@ class Settings(BaseSettings):
     # Document Ingestion Configuration
     use_gcs_ingestion: bool = Field(default=False, description="Enable document ingestion from GCS")
     gcs_bucket_name: Optional[str] = Field(default=None, description="GCS bucket name for document ingestion")
-    local_docs_dir: str = Field(default="data/documents", description="Local directory for documents")
+    local_document_path: str = Field(
+        default="local_storage/comprobante.txt",
+        description="Local file loaded when GCS ingestion is disabled or the GCS object does not exist (relative to backend/)",
+    )
 
     # Google Cloud Model Armor Configuration
     use_gcp_model_armor: bool = Field(default=False, description="Enable GCP Model Armor")

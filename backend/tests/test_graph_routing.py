@@ -30,5 +30,5 @@ def test_ends_on_unknown_target_or_threat():
 
 
 def test_pending_document_tool_call_goes_to_tool_node():
-    call = AIMessage(content="", tool_calls=[{"name": "read_document_tool", "args": {"document_name": "x"}, "id": "1"}])
+    call = AIMessage(content="", tool_calls=[{"name": "read_document_tool", "args": {"filename": "x"}, "id": "1"}])
     assert route_after_router({"orchestrator_scratchpad": [call], "execution_plan": []}) == "orchestrator_tools"
