@@ -100,6 +100,10 @@ class FinancialStorage:
         with self._lock:
             return self.accounts.get(account_id)
 
+    def get_accounts_by_user_id(self, user_id: str) -> List[AccountRecord]:
+        with self._lock:
+            return [account for account in self.accounts.values() if account.owner_id == user_id]
+
     def get_user_daily_total(self, user_id: str, date_str: Optional[str] = None) -> float:
         d = date_str or _current_date_str()
         with self._lock:
