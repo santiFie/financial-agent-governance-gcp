@@ -60,6 +60,9 @@ Frontend (`frontend/`): `npm install`, `npm run dev` (port 3000), `npm run build
 
 Full stack via Docker Compose: `make up-dev` (`.env.development`, `SECURITY_MODE=local_mock`, no GCP), `make up-prod` (`.env.production`, real Cloud DLP / Vertex / Firestore), `make down`, `make logs`.
 
+### Token economy for live-LLM tests
+Only run tests that call a real LLM (the `*_evals.py` files, `test_graph_flow.py`, `test_api.py` and anything marked `requires_live_llm`) when the code or tests they exercise were modified in the current change and the run is needed to validate it. If nothing related to a live test was touched (code, prompts, ground truth or the test itself), do NOT run it, to avoid wasting tokens. Prefer the offline suite for validation and say explicitly which live tests were skipped and why.
+
 ### Live-LLM evals
 `tests/test_readonly_agent_evals.py` and `tests/test_action_agent_evals.py` call a real LLM. They are skipped automatically unless `is_live_llm_available()` finds credentials for the configured provider. Some cases also need `LANGSMITH_API_KEY`/`LANGCHAIN_API_KEY`. Ground truth for the action agent lives in `tests/data/action_agent_ground_truth.json`, and the evaluators are in `tests/decision_models_evaluators.py`. Every other test is offline and mocks the LLM. `docs/tests_and_evaluation.md` lists which tests need network access.
 
@@ -79,7 +82,7 @@ START → sanitizer ─(is_threat)→ END
 - **pep_node** (`nodes/pep.py`) is the Policy Enforcement Point. It checks whether the recipient is trusted through `core/mcp_action_client.py`, then POSTs to the PDP at `settings.pdp_url`. If the PDP fails or times out, it falls back locally: trusted recipient and amount < 50,000 ARS goes Fast-Path, anything else needs HITL. Fast-Path executes directly. HITL stages the transfer and calls `interrupt()`. The graph resumes when `POST /api/approve` sends `Command(resume=...)` (`app/main.py`).
 
 ### Execution of money-moving actions
-Mutations go through `MCPActionClient`, which imports the tool functions from `mcp_financial_action_server/server.py` directly (it adds the repo root to `sys.path`). That server handles CBU/alias validation, idempotency keys, daily limits, and RLock atomicity (`storage.py`, `validation.py`). Reads use `app/db/mock_banking.py`.
+Mutations and reads go through `MCPActionClient`, which imports the tool functions from `mcp_financial_action_server/server.py` directly (it adds the repo root to `sys.path`). That server handles CBU/alias validation, idempotency keys, daily limits, and RLock atomicity (`storage.py`, `validation.py`). The read-only tools (`get_account_balances`, `get_recent_transactions`) are served by the same MCP server, so balances and movements always reflect executed transfers. `app/db/mock_banking.py` only holds the HITL approval queue. Agents may pass DLP tokens with or without brackets; `normalize_account_reference` (`core/security_context.py`) treats 22 digits as a CBU and an uppercase token name as `[NAME]`.
 
 ### Cross-cutting
 - `app/config.py` (pydantic-settings, reads `.env`) holds the key switches. `SECURITY_MODE` is `local_mock` or `gcp_live`. `LLM_PROVIDER` defaults to `litellm`, which falls back groq → nvidia → vertexai → openrouter; it can also be set to a single provider. `CHECKPOINTER_TYPE` is `memory` or `firestore`. There are also flags for GCS document ingestion and GCP Model Armor.
