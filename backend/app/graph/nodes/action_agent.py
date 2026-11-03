@@ -10,7 +10,7 @@ import logging
 from langchain_core.runnables import RunnableConfig
 from typing import Dict, Any, List
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from langgraph.prebuilt import create_react_agent
+from langgraph.prebuilt import ToolNode, create_react_agent
 from app.graph.state import AgentState
 from app.graph.plan_utils import get_active_step, complete_active_step
 from app.graph.tools.banking_write import (
@@ -31,7 +31,8 @@ def _build_executor():
     llm = get_chat_model(temperature=0.0)
     if llm is None:
         raise RuntimeError("Action Agent: no hay credenciales LLM configuradas.")
-    return create_react_agent(model=llm, tools=ACTION_TOOLS)
+    # Tool errors go back to the model as tool messages so the ReAct loop can correct itself.
+    return create_react_agent(model=llm, tools=ToolNode(ACTION_TOOLS, handle_tool_errors=True))
 
 def _text(content: Any) -> str:
     if isinstance(content, list):

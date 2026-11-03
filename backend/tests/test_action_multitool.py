@@ -173,3 +173,23 @@ def test_action_agent_registers_recipient_and_completes_step():
     assert result["status"] == "COMPLETED"
     assert "pending_tool_calls" not in result and "pending_transfer" not in result
     assert result["execution_plan"][0]["result"] == "Destinatario registrado."
+
+
+def test_action_agent_tool_error_is_returned_to_the_model_and_loop_continues():
+    """An invalid tool call (e.g. malformed CBU) does not crash the node: the model sees the error and answers."""
+    bad_call = {
+        "name": "register_recipient_tool",
+        "args": {"user_id": "user_default_01", "recipient_name": "X", "cbu": "123"},
+        "id": "call_bad",
+    }
+    state = {
+        "session_id": "sess_tool_error", "user_id": "user_default_01",
+        "execution_plan": [{"step_id": 1, "title": "t", "target_node": "action_agent", "description": "d", "result": None}],
+    }
+    result = _run_action_agent(
+        [AIMessage(content="", tool_calls=[bad_call]), AIMessage(content="No pude registrar: el CBU es inválido.")],
+        state,
+    )
+
+    assert result["status"] == "COMPLETED"
+    assert "inválido" in result["execution_plan"][0]["result"]
