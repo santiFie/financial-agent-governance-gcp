@@ -184,6 +184,16 @@ class MockBankingDB:
             "timestamp": record["executed_at"]
         }
 
+    def close_staged_transfer(self, tx_id: str, admin_user: str, resolved_target: str) -> None:
+        """Marks a staged transfer as executed. The debit itself is done by the MCP action server."""
+        record = self.pending_transfers.get(tx_id)
+        if record is None:
+            raise ValueError(f"Transacción {tx_id} no encontrada en cola de pendientes.")
+        record["status"] = "EXECUTED"
+        record["approved_by"] = admin_user
+        record["executed_at"] = datetime.utcnow().isoformat()
+        record["resolved_target"] = resolved_target
+
     def reject_staged_transfer(self, tx_id: str, admin_user: str, reason: Optional[str] = None) -> Dict[str, Any]:
         """Rejects a staged transfer."""
         if tx_id not in self.pending_transfers:

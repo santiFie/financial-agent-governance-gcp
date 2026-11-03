@@ -83,7 +83,7 @@ def test_pep_fast_path_when_trusted_and_under_threshold():
         "reason": "Fast-Path aprobado: destinatario registrado y monto inferior a $50.000 ARS"
     }
 
-    initial_balance = mock_banking_db.accounts["acc_001"].balance
+    initial_balance = financial_storage.get_account("acc_001").balance
 
     with patch("httpx.Client.post", return_value=mock_resp), \
          patch("app.graph.nodes.pep.interrupt") as mock_interrupt:
@@ -99,9 +99,9 @@ def test_pep_fast_path_when_trusted_and_under_threshold():
         assert "Fast-Path PEP" in result["final_response"]
         assert len(result["pending_tool_calls"]) == 0
 
-        # 5. Assert atomic balance debit in core banking
+        # 5. Assert atomic balance debit executed by the MCP action server
         expected_balance = round(initial_balance - amount, 2)
-        assert mock_banking_db.accounts["acc_001"].balance == expected_balance
+        assert financial_storage.get_account("acc_001").balance == expected_balance
 
 
 def test_pep_hitl_when_amount_exceeds_threshold():
@@ -146,7 +146,7 @@ def test_pep_hitl_when_amount_exceeds_threshold():
         "reason": "Monto supera el umbral de Fast-Path ($50.000 ARS)"
     }
 
-    initial_balance = mock_banking_db.accounts["acc_001"].balance
+    initial_balance = financial_storage.get_account("acc_001").balance
 
     with patch("httpx.Client.post", return_value=mock_resp), \
          patch("app.graph.nodes.pep.interrupt", return_value={"decision": "APPROVED", "admin_user": "oficial_riesgo"}) as mock_interrupt:
@@ -163,7 +163,7 @@ def test_pep_hitl_when_amount_exceeds_threshold():
         assert result["status"] == "COMPLETED"
         assert result["approval_status"] == "APPROVED"
         assert "Transferencia Ejecutada con Éxito" in result["final_response"]
-        assert mock_banking_db.accounts["acc_001"].balance == round(initial_balance - amount, 2)
+        assert financial_storage.get_account("acc_001").balance == round(initial_balance - amount, 2)
 
 
 def test_pep_hitl_when_untrusted_recipient():
@@ -232,7 +232,7 @@ def test_pep_hitl_rejected_by_human():
         ]
     }
 
-    initial_balance = mock_banking_db.accounts["acc_001"].balance
+    initial_balance = financial_storage.get_account("acc_001").balance
 
     with patch("httpx.Client.post", side_effect=httpx.ConnectError("PDP offline")), \
          patch("app.graph.nodes.pep.interrupt", return_value={"decision": "REJECTED", "admin_user": "auditor", "reason": "Patrón anómalo"}) as mock_interrupt:
@@ -242,7 +242,7 @@ def test_pep_hitl_rejected_by_human():
         assert result["approval_status"] == "REJECTED"
         assert "Transferencia Rechazada" in result["final_response"]
         # Balance untouched
-        assert mock_banking_db.accounts["acc_001"].balance == initial_balance
+        assert financial_storage.get_account("acc_001").balance == initial_balance
 
 
 def test_pep_resilient_fallback_when_pdp_offline():
@@ -384,3 +384,23 @@ def test_pep_resolves_surrogate_token_for_trusted_check():
         assert captured_payload is not None
         assert captured_payload["destination"] == real_cbu
         assert captured_payload["is_trusted_recipient"] is True
+
+
+def test_pep_reports_failure_when_mcp_rejects_the_transfer():
+    """MCP validation errors (e.g. unresolved token as destination) end the step as FAILED without debiting."""
+    state = {
+        "session_id": "sess_mcp_fail",
+        "user_id": "user_default_01",
+        "pending_tool_calls": [{"name": "transfer_funds_tool", "args": {
+            "source_account": "acc_001", "destination_account": "[CBU_NO_RESUELTO_1]", "amount": 1000.0}}],
+    }
+    initial_balance = financial_storage.get_account("acc_001").balance
+    mock_resp = MagicMock(status_code=200)
+    mock_resp.json.return_value = {"allow": True, "require_hitl": False, "reason": "fast"}
+
+    with patch("httpx.Client.post", return_value=mock_resp), patch("app.graph.nodes.pep.interrupt"):
+        result = pep_node(state)
+
+    assert result["status"] == "FAILED"
+    assert "No se pudo ejecutar" in result["final_response"]
+    assert financial_storage.get_account("acc_001").balance == initial_balance

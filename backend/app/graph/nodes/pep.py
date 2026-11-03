@@ -5,6 +5,7 @@ Evaluates Policy Decision Point (PDP) responses to determine Fast-Path vs HITL i
 """
 from typing import Dict, Any, List, Optional
 import httpx
+import uuid
 from langchain_core.messages import AIMessage
 from langgraph.types import interrupt
 
@@ -27,6 +28,34 @@ class AwaitableDict(dict):
 def _mark_current_step_completed(state: AgentState, result_text: str) -> List[Dict[str, Any]]:
     """Marks the active plan step as completed (transfer steps are completed by the PEP)."""
     return complete_active_step(state, result_text)
+
+
+def _execute_via_mcp(
+    user_id: str, source_account: str, destination: str, amount: float, concept: str, idempotency_key: str
+) -> Dict[str, Any]:
+    """Executes the transfer through the MCP action server (validation, idempotency, limits, atomic debit)."""
+    return mcp_action_client.execute_approved_transfer(
+        user_id=user_id,
+        source_account_id=source_account,
+        destination_cbu_or_alias=destination,
+        amount=amount,
+        currency="ARS",
+        concept=concept,
+        idempotency_key=idempotency_key,
+    )
+
+
+def _execution_failed(state: AgentState, error: Exception, approval_status: str) -> "AwaitableDict":
+    msg = f"❌ **No se pudo ejecutar la transferencia**\n\n• Motivo: {error}"
+    return AwaitableDict({
+        "final_response": msg,
+        "status": "FAILED",
+        "approval_status": approval_status,
+        "pending_tool_calls": [],
+        "pending_transfer": None,
+        "execution_plan": _mark_current_step_completed(state, msg),
+        "messages": [AIMessage(content=msg)],
+    })
 
 
 def pep_node(state: AgentState) -> AwaitableDict:
@@ -162,23 +191,22 @@ def pep_node(state: AgentState) -> AwaitableDict:
             "messages": [AIMessage(content=block_msg)],
         })
 
-    # Fast-Path Granted: No interrupt(), direct transfer
+    # Fast-Path Granted: No interrupt(), direct transfer through the MCP action server
     if not pdp_decision.get("require_hitl", False):
-        result = mock_banking_db.execute_direct_transfer(
-            session_id=session_id,
-            user_id=user_id,
-            source_acc=source_account,
-            dest_acc=target_for_check,
-            amount=amount,
-            concept=concept
-        )
+        try:
+            receipt = _execute_via_mcp(
+                user_id, source_account, target_for_check, amount, concept,
+                idempotency_key=f"fastpath-{session_id}-{uuid.uuid4().hex[:12]}",
+            )
+        except Exception as e:
+            return _execution_failed(state, e, approval_status="NONE")
 
         msg = (
             f"⚡ **Transferencia Ejecutada con Éxito (Fast-Path PEP)**\n\n"
-            f"• **ID Transacción:** `{result['transaction_id']}`\n"
-            f"• **Monto debitado:** ${result['debited_amount']:,.2f} {result['currency']}\n"
+            f"• **ID Transacción:** `{receipt['transaction_id']}`\n"
+            f"• **Monto debitado:** ${receipt['amount']:,.2f} {receipt['currency']}\n"
             f"• **Destino:** `{destination}` (Verificado de forma segura)\n"
-            f"• **Nuevo saldo disponible:** ${result['remaining_balance']:,.2f}\n"
+            f"• **Nuevo saldo disponible:** ${receipt['remaining_balance']:,.2f}\n"
             f"• **Gobernanza PEP:** Autorización Fast-Path concedida por PDP (Destinatario en agenda y monto < $50.000 ARS)."
         )
 
@@ -226,33 +254,21 @@ def pep_node(state: AgentState) -> AwaitableDict:
     admin_user = approval_decision.get("admin_user", "compliance_officer") if isinstance(approval_decision, dict) else "compliance_officer"
 
     if decision == "APPROVED":
-        result = mock_banking_db.execute_approved_transfer(
-            tx_id=tx_id,
-            admin_user=admin_user,
-            real_target_account=target_for_check
-        )
-
-        # Synchronize with FastMCP
         try:
-            dest_id = target_for_check if (len(target_for_check) == 22 and target_for_check.isdigit()) else "0170099220000067891234"
-            mcp_action_client.execute_approved_transfer(
-                user_id=user_id,
-                source_account_id=source_account,
-                destination_cbu_or_alias=dest_id,
-                amount=amount,
-                currency="ARS",
-                concept=f"HITL_TRANSFER_{tx_id}",
-                idempotency_key=f"hitl-tx-{tx_id}"
+            receipt = _execute_via_mcp(
+                user_id, source_account, target_for_check, amount, f"HITL_TRANSFER_{tx_id}",
+                idempotency_key=f"hitl-tx-{tx_id}",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            return _execution_failed(state, e, approval_status="APPROVED")
+        mock_banking_db.close_staged_transfer(tx_id=tx_id, admin_user=admin_user, resolved_target=target_for_check)
 
         msg = (
             f"✅ **Transferencia Ejecutada con Éxito**\n\n"
             f"• **ID Transacción:** `{tx_id}`\n"
-            f"• **Monto debitado:** ${result['debited_amount']:,.2f} {result['currency']}\n"
+            f"• **Monto debitado:** ${receipt['amount']:,.2f} {receipt['currency']}\n"
             f"• **Destino:** `{destination}` (Verificado de forma segura)\n"
-            f"• **Nuevo saldo disponible:** ${result['remaining_balance']:,.2f}\n"
+            f"• **Nuevo saldo disponible:** ${receipt['remaining_balance']:,.2f}\n"
             f"• **Aprobado por:** `{admin_user}` (Auditoría HITL)"
         )
         status = "COMPLETED"
