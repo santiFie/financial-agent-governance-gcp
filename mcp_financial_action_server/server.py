@@ -16,7 +16,7 @@ mcp = FastMCP(
     instructions=(
         "Servidor transaccional MCP para la ejecución de acciones críticas que modifican activos "
         "financieros del cliente (transferencias bancarias, alta de CBUs/cuentas destino, programación "
-        "y baja de débitos directos). Requiere autorización previa HITL."
+        "y baja de débitos directos, requieren autorización previa HITL) y consultas de solo lectura de saldos y movimientos."
     ),
 )
 
@@ -104,6 +104,26 @@ def schedule_direct_debit(
         frequency=frequency,
     )
     return receipt.model_dump()
+
+
+@mcp.tool(
+    name="get_account_balances",
+    description="Consulta los saldos actuales de las cuentas del cliente. Solo lectura.",
+    annotations={"destructiveHint": False, "idempotentHint": True, "readOnlyHint": True},
+)
+def get_account_balances(user_id: str) -> Dict[str, Any]:
+    """Consulta los saldos actuales de las cuentas del cliente."""
+    return {"accounts": financial_storage.get_account_balances(user_id=user_id)}
+
+
+@mcp.tool(
+    name="get_recent_transactions",
+    description="Consulta los últimos movimientos de las cuentas del cliente. Solo lectura.",
+    annotations={"destructiveHint": False, "idempotentHint": True, "readOnlyHint": True},
+)
+def get_recent_transactions(user_id: str, limit: int = 5) -> Dict[str, Any]:
+    """Consulta los últimos movimientos de las cuentas del cliente."""
+    return {"transactions": financial_storage.get_recent_transactions(user_id=user_id, limit=limit)}
 
 
 @mcp.tool(

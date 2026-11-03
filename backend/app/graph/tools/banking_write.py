@@ -4,10 +4,8 @@ Enqueues and stages critical operations (e.g. transfers) for Human-in-the-Loop a
 Does NOT directly debit funds until validated by compliance/operator.
 """
 from typing import Dict, Any, Optional
-import uuid
-from datetime import datetime, timezone
 from langchain_core.tools import tool
-from app.db.mock_banking import mock_banking_db
+from app.core.security_context import normalize_account_reference
 
 
 @tool
@@ -30,7 +28,7 @@ def register_recipient_tool(
     from mcp_financial_action_server.storage import financial_storage
 
     effective_name = (holder_name or recipient_name or "Destinatario Registrado").strip()
-    effective_cbu = (cbu or cbu_or_cvu or "").strip()
+    effective_cbu = normalize_account_reference(cbu or cbu_or_cvu)
     effective_bank = (bank_name or "Banco Destino").strip()
 
     # Resolve token if CBU is a surrogate token (e.g. [CBU_BANCARIO_1])
@@ -80,7 +78,7 @@ def transfer_funds_tool(
     No ejecuta el débito bancario directo hasta la resolución de gobernanza por el PEP.
     """
     src = source_account_id or source_account or "acc_001"
-    dest = destination or destination_account or ""
+    dest = normalize_account_reference(destination or destination_account)
     return {
         "status": "PENDING_PEP",
         "user_id": user_id,

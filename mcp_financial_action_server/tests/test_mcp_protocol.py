@@ -26,8 +26,14 @@ async def test_mcp_list_tools():
         "register_destination_account",
         "schedule_direct_debit",
         "cancel_scheduled_debit",
+        "get_account_balances",
+        "get_recent_transactions",
     }
     assert expected_tools.issubset(set(tool_map.keys()))
+
+    # Read tools are annotated read-only
+    for name in ("get_account_balances", "get_recent_transactions"):
+        assert getattr(tool_map[name].annotations, "read_only_hint", None) is True
 
     # Check annotations on execute_bank_transfer
     transfer_tool = tool_map["execute_bank_transfer"]

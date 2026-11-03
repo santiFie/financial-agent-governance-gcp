@@ -86,6 +86,18 @@ class FinancialStorage:
             ),
         }
         self.ledger = []
+        self.history = [
+            {"tx_id": "tx_01", "account_id": "acc_001", "type": "CREDIT", "amount": 350000.00,
+             "description": "Depósito de Haberes / Sueldo Empresa Tech", "timestamp": "2026-10-01T09:00:00+00:00"},
+            {"tx_id": "tx_02", "account_id": "acc_001", "type": "DEBIT", "amount": 15400.00,
+             "description": "Supermercado Coto", "timestamp": "2026-10-03T18:30:00+00:00"},
+            {"tx_id": "tx_03", "account_id": "acc_001", "type": "DEBIT", "amount": 6500.00,
+             "description": "Servicios Públicos - Luz y Agua", "timestamp": "2026-10-05T10:15:00+00:00"},
+            {"tx_id": "tx_04", "account_id": "acc_001", "type": "DEBIT", "amount": 4200.00,
+             "description": "Suscripción Streaming", "timestamp": "2026-10-07T21:00:00+00:00"},
+            {"tx_id": "tx_05", "account_id": "acc_002", "type": "CREDIT", "amount": 500.00,
+             "description": "Transferencia Internacional Recibida", "timestamp": "2026-10-08T12:00:00+00:00"},
+        ]
         self.idempotency_store = {}
         self.daily_transfers = {}
         self.address_book = {}
@@ -103,6 +115,41 @@ class FinancialStorage:
     def get_accounts_by_user_id(self, user_id: str) -> List[AccountRecord]:
         with self._lock:
             return [account for account in self.accounts.values() if account.owner_id == user_id]
+
+    def get_account_balances(self, user_id: str) -> List[Dict[str, Any]]:
+        """Read-only: account summaries and current balances of a user."""
+        with self._lock:
+            return [
+                {
+                    "account_id": acc.account_id,
+                    "account_number": acc.account_number,
+                    "owner_name": acc.owner_name,
+                    "balance": acc.balance,
+                    "currency": acc.currency,
+                }
+                for acc in self.accounts.values()
+                if acc.owner_id == user_id
+            ]
+
+    def get_recent_transactions(self, user_id: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Read-only: most recent movements (seeded history plus executed transfers) of a user's accounts."""
+        with self._lock:
+            account_ids = {acc.account_id for acc in self.accounts.values() if acc.owner_id == user_id}
+            movements = [dict(tx) for tx in self.history if tx["account_id"] in account_ids]
+            movements += [
+                {
+                    "tx_id": e["transaction_id"],
+                    "account_id": e["account_id"],
+                    "type": e["type"],
+                    "amount": e["amount"],
+                    "description": f"Transferencia enviada a {e['destination']} ({e['concept']})",
+                    "timestamp": e["timestamp"],
+                }
+                for e in self.ledger
+                if e["user_id"] == user_id
+            ]
+            movements.sort(key=lambda m: m["timestamp"], reverse=True)
+            return movements[: max(int(limit), 0)]
 
     def get_user_daily_total(self, user_id: str, date_str: Optional[str] = None) -> float:
         d = date_str or _current_date_str()

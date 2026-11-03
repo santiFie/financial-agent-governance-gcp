@@ -20,13 +20,11 @@ def clean_state():
     with token_vault._lock:
         token_vault._vault.clear()
     # Reset mock banking accounts
-    mock_banking_db.accounts["acc_001"].balance = 485250.75
     mock_banking_db.pending_transfers.clear()
     yield
     financial_storage.reset_state()
     with token_vault._lock:
         token_vault._vault.clear()
-    mock_banking_db.accounts["acc_001"].balance = 485250.75
     mock_banking_db.pending_transfers.clear()
 
 

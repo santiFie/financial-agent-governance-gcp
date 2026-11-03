@@ -3,7 +3,7 @@ MCP Action Client.
 Integrates the Action Agent and Backend with the FastMCP Financial Action Server.
 Enforces that critical tools are only executed following HITL approval.
 """
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 import os
 import sys
 from pathlib import Path
@@ -17,6 +17,8 @@ from mcp_financial_action_server.server import (
     register_destination_account,
     schedule_direct_debit,
     cancel_scheduled_debit,
+    get_account_balances,
+    get_recent_transactions,
 )
 
 
@@ -50,6 +52,16 @@ class MCPActionClient:
             concept=concept,
             idempotency_key=idempotency_key,
         )
+
+    @classmethod
+    def read_account_balances(cls, user_id: str) -> List[Dict[str, Any]]:
+        """Read-only: balances of the user's accounts, served by the MCP server."""
+        return get_account_balances(user_id=user_id)["accounts"]
+
+    @classmethod
+    def read_recent_transactions(cls, user_id: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Read-only: latest movements of the user's accounts, served by the MCP server."""
+        return get_recent_transactions(user_id=user_id, limit=limit)["transactions"]
 
     @classmethod
     def register_account(

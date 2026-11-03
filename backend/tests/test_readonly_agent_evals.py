@@ -21,7 +21,7 @@ from langsmith import traceable, Client
 from app.config import settings
 from app.core.llm import get_chat_model
 from app.core.telemetry import build_trace_config
-from app.db.mock_banking import mock_banking_db
+from mcp_financial_action_server.storage import financial_storage
 from app.graph.nodes.readonly_agent import readonly_agent_node
 from app.graph.state import AgentState
 
@@ -45,16 +45,10 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(autouse=True)
 def reset_banking_state():
-    """Ensures mock banking state is clean before each eval."""
-    mock_banking_db.accounts["acc_001"].balance = 485250.75
-    mock_banking_db.accounts["acc_002"].balance = 1520.00
-    mock_banking_db.accounts.pop("acc_audit_01", None)
-    mock_banking_db.pending_transfers.clear()
+    """Ensures MCP banking state is clean before each eval."""
+    financial_storage.reset_state()
     yield
-    mock_banking_db.accounts["acc_001"].balance = 485250.75
-    mock_banking_db.accounts["acc_002"].balance = 1520.00
-    mock_banking_db.accounts.pop("acc_audit_01", None)
-    mock_banking_db.pending_transfers.clear()
+    financial_storage.reset_state()
 
 
 @traceable(name="execute_readonly_eval_step", run_type="chain", tags=["eval", "readonly-agent", "real-llm"])
@@ -137,8 +131,8 @@ def test_eval_balances_task_calls_only_account_balances():
         "messages": [],
     }
 
-    with patch.object(mock_banking_db, "get_account_balances", wraps=mock_banking_db.get_account_balances) as spy_balances:
-        with patch.object(mock_banking_db, "get_recent_transactions", wraps=mock_banking_db.get_recent_transactions) as spy_txs:
+    with patch.object(financial_storage, "get_account_balances", wraps=financial_storage.get_account_balances) as spy_balances:
+        with patch.object(financial_storage, "get_recent_transactions", wraps=financial_storage.get_recent_transactions) as spy_txs:
             eval_res = run_readonly_eval(
                 test_name="balances_inquiry",
                 state=state,
@@ -196,8 +190,8 @@ def test_eval_transactions_task_calls_only_recent_transactions():
         "messages": [],
     }
 
-    with patch.object(mock_banking_db, "get_account_balances", wraps=mock_banking_db.get_account_balances) as spy_balances:
-        with patch.object(mock_banking_db, "get_recent_transactions", wraps=mock_banking_db.get_recent_transactions) as spy_txs:
+    with patch.object(financial_storage, "get_account_balances", wraps=financial_storage.get_account_balances) as spy_balances:
+        with patch.object(financial_storage, "get_recent_transactions", wraps=financial_storage.get_recent_transactions) as spy_txs:
             eval_res = run_readonly_eval(
                 test_name="recent_transactions",
                 state=state,
@@ -247,8 +241,8 @@ def test_eval_compound_task_calls_both_tools():
         "messages": [],
     }
 
-    with patch.object(mock_banking_db, "get_account_balances", wraps=mock_banking_db.get_account_balances) as spy_balances:
-        with patch.object(mock_banking_db, "get_recent_transactions", wraps=mock_banking_db.get_recent_transactions) as spy_txs:
+    with patch.object(financial_storage, "get_account_balances", wraps=financial_storage.get_account_balances) as spy_balances:
+        with patch.object(financial_storage, "get_recent_transactions", wraps=financial_storage.get_recent_transactions) as spy_txs:
             eval_res = run_readonly_eval(
                 test_name="compound_balances_and_transactions",
                 state=state,
@@ -312,7 +306,7 @@ def test_eval_multi_step_plan_completes_only_active_step():
         "messages": [],
     }
 
-    with patch.object(mock_banking_db, "get_account_balances", wraps=mock_banking_db.get_account_balances) as spy_balances:
+    with patch.object(financial_storage, "get_account_balances", wraps=financial_storage.get_account_balances) as spy_balances:
         eval_res = run_readonly_eval(
             test_name="multistep_active_step_2",
             state=state,
@@ -351,8 +345,8 @@ def test_eval_langsmith_telemetry_and_config_propagation():
     user_id = "user_auditor_99"
 
     # Seed an account for user_auditor_99 to verify data isolation
-    from app.db.mock_banking import BankAccount
-    mock_banking_db.accounts["acc_audit_01"] = BankAccount(
+    from mcp_financial_action_server.storage import AccountRecord
+    financial_storage.accounts["acc_audit_01"] = AccountRecord(
         account_id="acc_audit_01",
         owner_id=user_id,
         owner_name="Auditor General",
@@ -392,7 +386,7 @@ def test_eval_langsmith_telemetry_and_config_propagation():
     assert config["metadata"]["trace_id"] == trace_id
 
     # Execute with explicit config
-    with patch.object(mock_banking_db, "get_account_balances", wraps=mock_banking_db.get_account_balances) as spy_balances:
+    with patch.object(financial_storage, "get_account_balances", wraps=financial_storage.get_account_balances) as spy_balances:
         output = readonly_agent_node(state, config=config)
 
     assert output["status"] == "COMPLETED"

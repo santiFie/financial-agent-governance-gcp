@@ -8,6 +8,8 @@ from mcp_financial_action_server.server import (
     register_destination_account,
     schedule_direct_debit,
     cancel_scheduled_debit,
+    get_account_balances,
+    get_recent_transactions,
 )
 
 
@@ -284,3 +286,28 @@ def test_schedule_and_cancel_direct_debit():
             user_id="user_default_01",
             debit_id=debit_id,
         )
+
+
+def test_read_tools_return_balances_and_seeded_history():
+    balances = get_account_balances(user_id="user_default_01")["accounts"]
+    assert {a["account_id"]: a["balance"] for a in balances} == {"acc_001": 485250.75, "acc_002": 1520.0}
+    assert get_account_balances(user_id="otro_usuario")["accounts"] == []
+
+    txs = get_recent_transactions(user_id="user_default_01", limit=3)["transactions"]
+    assert len(txs) == 3
+    assert [t["timestamp"] for t in txs] == sorted((t["timestamp"] for t in txs), reverse=True)
+
+
+def test_read_tools_reflect_executed_transfers():
+    execute_bank_transfer(
+        user_id="user_default_01", source_account_id="acc_001",
+        destination_cbu_or_alias="0170099220000067891234", amount=1000.0,
+        currency="ARS", concept="TEST", idempotency_key="read-after-write-1",
+    )
+
+    balances = {a["account_id"]: a["balance"] for a in get_account_balances(user_id="user_default_01")["accounts"]}
+    latest = get_recent_transactions(user_id="user_default_01", limit=1)["transactions"][0]
+
+    assert balances["acc_001"] == 484250.75
+    assert latest["type"] == "DEBIT" and latest["amount"] == 1000.0
+    assert "0170099220000067891234" in latest["description"]

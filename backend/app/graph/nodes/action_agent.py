@@ -20,6 +20,7 @@ from app.graph.tools.banking_write import (
 )
 from app.core.llm import get_chat_model
 from app.core.prompt_manager import prompt_manager
+from app.core.security_context import normalize_account_reference
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ def _collect_staged_transfers(messages: List[Any]) -> List[Dict[str, Any]]:
 
 
 def _to_pending_transfer(args: Dict[str, Any], session_id: str, user_id: str) -> Dict[str, Any]:
-    destination = str(args.get("destination_account") or args.get("destination") or "")
+    destination = normalize_account_reference(args.get("destination_account") or args.get("destination"))
     source = str(args.get("source_account_id") or args.get("source_account") or SOURCE_ACCOUNT)
     return {
         "session_id": session_id,

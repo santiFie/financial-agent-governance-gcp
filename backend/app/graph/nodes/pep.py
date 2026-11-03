@@ -13,7 +13,7 @@ from app.graph.state import AgentState
 from app.graph.plan_utils import complete_active_step
 from app.config import settings
 from app.db.mock_banking import mock_banking_db
-from app.core.security_context import token_vault
+from app.core.security_context import token_vault, normalize_account_reference
 from app.core.mcp_action_client import mcp_action_client
 
 
@@ -93,11 +93,10 @@ def pep_node(state: AgentState) -> AwaitableDict:
         if tc_name in ["transfer_funds_tool"]:
             args = tool_call.get("args", {})
             amount = float(args.get("amount", 0.0))
-            destination = str(
+            destination = normalize_account_reference(
                 args.get("destination_account")
                 or args.get("destination")
                 or args.get("target_token")
-                or ""
             )
             source_account = str(args.get("source_account_id") or args.get("source_account") or "acc_001")
             concept = str(args.get("concept", concept))
@@ -106,11 +105,10 @@ def pep_node(state: AgentState) -> AwaitableDict:
     # Fallback to pending_transfer dict if needed
     if amount is None and pending_transfer:
         amount = float(pending_transfer.get("amount", 0.0))
-        destination = str(
+        destination = normalize_account_reference(
             pending_transfer.get("destination")
             or pending_transfer.get("destination_account")
             or pending_transfer.get("target_token")
-            or ""
         )
         source_account = str(
             pending_transfer.get("source_account")

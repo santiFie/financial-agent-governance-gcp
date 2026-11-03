@@ -1,107 +1,20 @@
 """
-Mock Core Banking Database.
-Implements data storage for bank accounts, transactions, and staged transfers.
-Enforces separation between Read-Only queries and Authorized Write operations.
+Staged-transfer queue for Human-in-the-Loop approval.
 """
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone
 import uuid
 
 
-class BankAccount:
-    def __init__(self, account_id: str, owner_id: str, owner_name: str, account_number: str, balance: float, currency: str = "ARS"):
-        self.account_id = account_id
-        self.owner_id = owner_id
-        self.owner_name = owner_name
-        self.account_number = account_number
-        self.balance = balance
-        self.currency = currency
-        self.created_at = datetime.utcnow().isoformat()
-
-
-class Transaction:
-    def __init__(self, tx_id: str, account_id: str, tx_type: str, amount: float, description: str, timestamp: Optional[str] = None):
-        self.tx_id = tx_id
-        self.account_id = account_id
-        self.tx_type = tx_type  # "CREDIT" | "DEBIT"
-        self.amount = amount
-        self.description = description
-        self.timestamp = timestamp or datetime.utcnow().isoformat()
-
-
 class MockBankingDB:
     """
-    Simulated Core Banking System.
+    HITL approval queue.
+    Accounts, balances, movements and transfer execution live in the MCP action server;
+    this store only keeps the transfers staged for human review.
     """
     def __init__(self):
-        # Initial Seed Data
-        self.accounts: Dict[str, BankAccount] = {
-            "acc_001": BankAccount(
-                account_id="acc_001",
-                owner_id="user_default_01",
-                owner_name="Santiago Gómez",
-                account_number="CA-001293847-ARS",
-                balance=485250.75,
-                currency="ARS"
-            ),
-            "acc_002": BankAccount(
-                account_id="acc_002",
-                owner_id="user_default_01",
-                owner_name="Santiago Gómez",
-                account_number="CC-009847321-USD",
-                balance=1520.00,
-                currency="USD"
-            )
-        }
-
-        self.transactions: List[Transaction] = [
-            Transaction("tx_01", "acc_001", "CREDIT", 350000.00, "Depósito de Haberes / Sueldo Empresa Tech"),
-            Transaction("tx_02", "acc_001", "DEBIT", 15400.00, "Supermercado Coto"),
-            Transaction("tx_03", "acc_001", "DEBIT", 6500.00, "Servicios Públicos - Luz y Agua"),
-            Transaction("tx_04", "acc_001", "DEBIT", 4200.00, "Suscripción Streaming"),
-            Transaction("tx_05", "acc_002", "CREDIT", 500.00, "Transferencia Internacional Recibida")
-        ]
-
-        # Staged pending transfers awaiting Human-in-the-Loop review
         self.pending_transfers: Dict[str, Dict[str, Any]] = {}
 
-    # ----------------------------------------------------------------------
-    # READ-ONLY OPERATIONS (Callable by Read-Only DB Agent)
-    # ----------------------------------------------------------------------
-    def get_account_balances(self, user_id: str) -> List[Dict[str, Any]]:
-        """Returns account summaries and current balances for user."""
-        user_accounts = [acc for acc in self.accounts.values() if acc.owner_id == user_id]
-        return [
-            {
-                "account_id": acc.account_id,
-                "account_number": acc.account_number,
-                "owner_name": acc.owner_name,
-                "balance": acc.balance,
-                "currency": acc.currency
-            }
-            for acc in user_accounts
-        ]
-
-    def get_recent_transactions(self, user_id: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Returns recent transactions for user accounts."""
-        user_account_ids = {acc.account_id for acc in self.accounts.values() if acc.owner_id == user_id}
-        filtered_txs = [tx for tx in self.transactions if tx.account_id in user_account_ids]
-        filtered_txs.sort(key=lambda x: x.timestamp, reverse=True)
-        return [
-            {
-                "tx_id": tx.tx_id,
-                "account_id": tx.account_id,
-                "type": tx.tx_type,
-                "amount": tx.amount,
-                "description": tx.description,
-                "timestamp": tx.timestamp
-            }
-            for tx in filtered_txs[:limit]
-        ]
-
-    # ----------------------------------------------------------------------
-    # WRITE OPERATIONS (Restricted: Action Agent stages, Admin approves)
-    # ----------------------------------------------------------------------
     def stage_transfer(
         self,
         session_id: str,
@@ -133,57 +46,6 @@ class MockBankingDB:
         """Returns all transfers in PENDING_APPROVAL status."""
         return [t for t in self.pending_transfers.values() if t["status"] == "PENDING_APPROVAL"]
 
-    def execute_approved_transfer(
-        self,
-        tx_id: str,
-        admin_user: str,
-        real_target_account: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Executes a staged transfer after Human-in-the-Loop approval.
-        Modifies balance atomically.
-        """
-        if tx_id not in self.pending_transfers:
-            raise ValueError(f"Transacción {tx_id} no encontrada en cola de pendientes.")
-
-        record = self.pending_transfers[tx_id]
-        if record["status"] != "PENDING_APPROVAL":
-            raise ValueError(f"Transacción ya procesada con estado: {record['status']}")
-
-        source_acc = self.accounts.get(record["source_account"])
-        if not source_acc:
-            raise ValueError(f"Cuenta de origen {record['source_account']} no existe.")
-
-        if source_acc.balance < record["amount"]:
-            record["status"] = "REJECTED_INSUFFICIENT_FUNDS"
-            raise ValueError(f"Fondos insuficientes. Saldo disponible: {source_acc.balance}, Monto requerido: {record['amount']}")
-
-        # Atomic debit
-        source_acc.balance -= record["amount"]
-        record["status"] = "EXECUTED"
-        record["approved_by"] = admin_user
-        record["executed_at"] = datetime.utcnow().isoformat()
-        record["resolved_target"] = real_target_account or "CUENTA_EXTERNA_AUTORIZADA"
-
-        # Record ledger transaction
-        ledger_tx = Transaction(
-            tx_id=f"tx_exec_{uuid.uuid4().hex[:8]}",
-            account_id=source_acc.account_id,
-            tx_type="DEBIT",
-            amount=record["amount"],
-            description=f"Transferencia enviada a {record['resolved_target']} (Aprobada por {admin_user})"
-        )
-        self.transactions.insert(0, ledger_tx)
-
-        return {
-            "status": "EXECUTED",
-            "transaction_id": tx_id,
-            "debited_amount": record["amount"],
-            "remaining_balance": source_acc.balance,
-            "currency": source_acc.currency,
-            "timestamp": record["executed_at"]
-        }
-
     def close_staged_transfer(self, tx_id: str, admin_user: str, resolved_target: str) -> None:
         """Marks a staged transfer as executed. The debit itself is done by the MCP action server."""
         record = self.pending_transfers.get(tx_id)
@@ -206,63 +68,6 @@ class MockBankingDB:
         record["updated_at"] = datetime.utcnow().isoformat()
         return record
 
-    def execute_direct_transfer(
-        self,
-        session_id: str,
-        user_id: str,
-        source_acc: str,
-        dest_acc: str,
-        amount: float,
-        concept: str = "Transferencia directa (Fast-Path PEP)"
-    ) -> Dict[str, Any]:
-        """
-        Executes an immediate direct transfer without requiring pre-staged transfer ID.
-        Used for transactions authorized by PEP Fast-Path governance.
-        """
-        source_account = self.accounts.get(source_acc)
-        if not source_account:
-            raise ValueError(f"Cuenta de origen '{source_acc}' no existe.")
-        if source_account.owner_id != user_id:
-            raise ValueError(f"El usuario '{user_id}' no es titular de la cuenta '{source_acc}'.")
-        if source_account.balance < float(amount):
-            raise ValueError(
-                f"Fondos insuficientes. Saldo disponible: ${source_account.balance:,.2f}, "
-                f"Monto requerido: ${float(amount):,.2f}."
-            )
 
-        source_account.balance = round(source_account.balance - float(amount), 2)
-        if dest_acc in self.accounts:
-            self.accounts[dest_acc].balance = round(self.accounts[dest_acc].balance + float(amount), 2)
-
-        tx_id = f"tx_fast_{uuid.uuid4().hex[:8]}"
-        now_iso = datetime.now(timezone.utc).isoformat()
-
-        ledger_tx = Transaction(
-            tx_id=tx_id,
-            account_id=source_account.account_id,
-            tx_type="DEBIT",
-            amount=float(amount),
-            description=f"{concept} a {dest_acc}",
-            timestamp=now_iso
-        )
-        self.transactions.insert(0, ledger_tx)
-
-        return {
-            "status": "EXECUTED",
-            "transaction_id": tx_id,
-            "session_id": session_id,
-            "user_id": user_id,
-            "source_account": source_acc,
-            "dest_acc": dest_acc,
-            "target_account": dest_acc,
-            "debited_amount": float(amount),
-            "amount": float(amount),
-            "remaining_balance": source_account.balance,
-            "currency": source_account.currency,
-            "timestamp": now_iso
-        }
-
-
-# Global singleton mock core banking instance
 mock_banking_db = MockBankingDB()
 

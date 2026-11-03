@@ -29,6 +29,7 @@ from langsmith import Client, traceable
 from langsmith.evaluation import evaluate
 
 from app.config import settings
+from app.core.mcp_action_client import mcp_action_client
 from app.core.security_context import token_vault
 from app.db.mock_banking import mock_banking_db
 from app.graph.graph import financial_graph
@@ -60,7 +61,7 @@ def load_scenarios() -> List[Dict[str, Any]]:
 
 def _reset_state() -> None:
     financial_storage.reset_state()
-    mock_banking_db.__init__()
+    mock_banking_db.pending_transfers.clear()
 
 
 def _resolver_for(session_id: str):
@@ -86,7 +87,7 @@ def predict_attack_run(inputs: Dict[str, Any]) -> Dict[str, Any]:
 
     original_register = register_recipient_tool.func
     original_transfer = transfer_funds_tool.func
-    original_direct = mock_banking_db.execute_direct_transfer
+    original_execute = mcp_action_client.execute_approved_transfer
 
     def spy_register(*args, **kwargs):
         tool_calls.append({"name": "register_recipient_tool", "args": dict(kwargs)})
@@ -96,16 +97,18 @@ def predict_attack_run(inputs: Dict[str, Any]) -> Dict[str, Any]:
         tool_calls.append({"name": "transfer_funds_tool", "args": dict(kwargs)})
         return original_transfer(*args, **kwargs)
 
-    def spy_direct(*args, **kwargs):
-        result = original_direct(*args, **kwargs)
-        executed_transfers.append({"destination": kwargs.get("dest_acc"), "amount": kwargs.get("amount")})
+    def spy_execute(*args, **kwargs):
+        result = original_execute(*args, **kwargs)
+        executed_transfers.append(
+            {"destination": kwargs.get("destination_cbu_or_alias"), "amount": kwargs.get("amount")}
+        )
         return result
 
     _reset_state()
     try:
         with patch.object(register_recipient_tool, "func", side_effect=spy_register), \
              patch.object(transfer_funds_tool, "func", side_effect=spy_transfer), \
-             patch.object(mock_banking_db, "execute_direct_transfer", side_effect=spy_direct):
+             patch.object(mcp_action_client, "execute_approved_transfer", side_effect=spy_execute):
             try:
                 financial_graph.invoke(
                     {

@@ -4,7 +4,29 @@ Ensures strict Defense-in-Depth by isolating raw sensitive PII in a secure vault
 so that LLM context windows only receive surrogate anonymized tokens.
 """
 from typing import Dict, Optional, Tuple
+import re
 import threading
+
+
+_CBU_PATTERN = re.compile(r"\d{22}")
+_TOKEN_NAME_PATTERN = re.compile(r"[A-Z][A-Z0-9_]*")
+
+
+def normalize_account_reference(value: Optional[str]) -> str:
+    """
+    Normalizes an account reference supplied by an agent.
+    - 22 digits: a real CBU/CVU, returned unchanged.
+    - A token name, with or without brackets ("CBU_BANCARIO_1" / "[CBU_BANCARIO_1]"): returned as "[NAME]",
+      the form stored in the TokenVault.
+    - Anything else (e.g. an alias): returned unchanged.
+    """
+    candidate = (value or "").strip()
+    if _CBU_PATTERN.fullmatch(candidate):
+        return candidate
+    name = candidate[1:-1].strip() if candidate.startswith("[") and candidate.endswith("]") else candidate
+    if _TOKEN_NAME_PATTERN.fullmatch(name):
+        return f"[{name}]"
+    return candidate
 
 
 class TokenVault:

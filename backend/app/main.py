@@ -21,6 +21,7 @@ from app.models.api_schemas import (
 )
 from app.graph.graph import financial_graph
 from app.db.mock_banking import mock_banking_db
+from app.core.mcp_action_client import mcp_action_client
 from app.core.telemetry import build_trace_config, get_telemetry_status
 
 app = FastAPI(
@@ -205,7 +206,7 @@ async def approve_endpoint(request: ApproveRequest):
         )
 
     # Check updated balance if executed
-    accounts = mock_banking_db.get_account_balances("user_default_01")
+    accounts = mcp_action_client.read_account_balances("user_default_01")
     primary_balance = accounts[0]["balance"] if accounts else None
 
     return ApproveResponse(
@@ -243,6 +244,6 @@ def get_user_accounts(user_id: str = "user_default_01"):
     """Returns accounts and balances for user profile dashboard."""
     return {
         "user_id": user_id,
-        "accounts": mock_banking_db.get_account_balances(user_id),
-        "recent_transactions": mock_banking_db.get_recent_transactions(user_id, limit=5)
+        "accounts": mcp_action_client.read_account_balances(user_id),
+        "recent_transactions": mcp_action_client.read_recent_transactions(user_id, limit=5)
     }
