@@ -10,8 +10,9 @@ Este documento detalla la estructura, propósito, dependencias y comportamiento 
 | :--- | :--- | :---: | :---: | :--- |
 | **`tests/test_sanitizer.py`** | Unitaria / Heurística | ❌ **No** | ❌ No (Offline) | `DlpSanitizer`, `TokenVault`, `ModelArmor` |
 | **`tests/test_llm_nodes.py`** | Unitaria con Mocks | ❌ **No** | ❌ No (Offline) | `LLM Factory`, `router_node`, `readonly_agent_node`, `action_agent_node` |
-| **`tests/test_graph_flow.py`** | Integración LangGraph | ⚠️ **Parcial (2 de 3)** |  Sí (si no se usa mock) | `financial_graph`, Checkpointer, Breakpoints HITL |
-| **`tests/test_api.py`** | Integración Endpoints REST | ⚠️ **Parcial (3 de 4)** |  Sí (si no se usa mock) | FastAPI (`/api/chat`, `/api/approve`, `/api/health`) |
+| **`tests/test_readonly_agent_evals.py`** | Evals con LLM Real / Tool-Calling | ✅ **SÍ** | 🌐 Sí (Groq/Gemini/NIM) | `readonly_agent_node`, `PlanStep`, LangSmith Tracing |
+| **`tests/test_graph_flow.py`** | Integración LangGraph | ⚠️ **Parcial (2 de 3)** | 🌐 Sí (si no se usa mock) | `financial_graph`, Checkpointer, Breakpoints HITL |
+| **`tests/test_api.py`** | Integración Endpoints REST | ⚠️ **Parcial (3 de 4)** | 🌐 Sí (si no se usa mock) | FastAPI (`/api/chat`, `/api/approve`, `/api/health`) |
 
 ---
 
@@ -84,7 +85,42 @@ Verifica la orquestación interna de los agentes, tool calling estructurado y re
 
 ---
 
-### C. `tests/test_graph_flow.py` (Integración de Flujos LangGraph)
+### C. `tests/test_readonly_agent_evals.py` (Evals con LLM Real y Trazabilidad LangSmith)
+
+Suite de evaluación que valida la precisión del LLM real en el razonamiento agéntico ReAct, selección estricta de herramientas de solo lectura y trazabilidad en LangSmith.
+
+* **`test_eval_balances_task_calls_only_account_balances()`**
+  * **Función:** Tarea de consulta de saldos en `PlanStep`.
+  * **¿Invoca Modelo?:**  **SÍ (LLM Real)**.
+  * **Qué testea:**
+    1. Invocación exclusiva de `get_account_balances` (exactamente 1 vez) con `user_id`.
+    2. Cero llamadas a `get_recent_transactions`.
+    3. Que `final_response` contenga saldos reales de cuentas (`485,250.75 ARS`, `1,520 USD`).
+    4. Actualización del paso activo en `execution_plan` marcándolo con el resultado final.
+
+* **`test_eval_transactions_task_calls_only_recent_transactions()`**
+  * **Función:** Tarea de movimientos bancarios en `PlanStep`.
+  * **¿Invoca Modelo?:**  **SÍ (LLM Real)**.
+  * **Qué testea:** Invocación exclusiva de `get_recent_transactions` (sin llamar a saldos), reporte de transacciones y completado del paso.
+
+* **`test_eval_compound_task_calls_both_tools()`**
+  * **Función:** Tarea compuesta de conciliación (saldos + movimientos) en `PlanStep`.
+  * **¿Invoca Modelo?:**  **SÍ (LLM Real)**.
+  * **Qué testea:** Invocación de ambas herramientas secuencialmente en el bucle ReAct, síntesis combinada y completado del paso.
+
+* **`test_eval_multi_step_plan_completes_only_active_step()`**
+  * **Función:** Ejecución del Paso 2 en un plan multi-paso.
+  * **¿Invoca Modelo?:**  **SÍ (LLM Real)**.
+  * **Qué testea:** Que únicamente el paso activo asignado a `readonly_agent` sea procesado y completado, preservando intactos los pasos previos y posteriores.
+
+* **`test_eval_langsmith_telemetry_and_config_propagation()`**
+  * **Función:** Propagación de contexto y configuración de trazabilidad LangSmith.
+  * **¿Invoca Modelo?:**  **SÍ (LLM Real)**.
+  * **Qué testea:** Inyección de `RunnableConfig` generado con `build_trace_config`, preservación de `run_id`, `tags`, `metadata` y propagación de `user_id` hacia el ejecutor ReAct.
+
+---
+
+### D. `tests/test_graph_flow.py` (Integración de Flujos LangGraph)
 
 Evalúa la máquina de estados de LangGraph de inicio a fin (`financial_graph`).
 
