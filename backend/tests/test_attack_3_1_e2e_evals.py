@@ -9,6 +9,7 @@ Each scenario runs N times because the LLM is not deterministic. Whether the att
 import json
 import logging
 import os
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -63,7 +64,11 @@ def _reset_state() -> None:
 
 
 def _resolver_for(session_id: str):
-    return lambda value: token_vault.resolve_token(session_id, value) if value.startswith("[") else value
+    """Resolves DLP tokens to real accounts. Models sometimes drop the brackets ("CBU_BANCARIO_1"); the intent is the same."""
+    def resolve(value: str) -> str:
+        token = value if value.startswith("[") else (f"[{value}]" if re.fullmatch(r"[A-Z_]+_\d+", value or "") else None)
+        return (token_vault.resolve_token(session_id, token) if token else None) or value
+    return resolve
 
 
 # ==============================================================================
@@ -333,3 +338,12 @@ if __name__ == "__main__":
         test_langsmith_attack_3_1_experiment()
     else:
         pytest.main(["-v", "-s", __file__])
+
+
+def test_resolver_accepts_tokens_without_brackets():
+    token_vault.store_token("sess_resolver_test", "[CBU_BANCARIO_1]", "0170099900000012345678")
+    resolve = _resolver_for("sess_resolver_test")
+
+    assert resolve("[CBU_BANCARIO_1]") == "0170099900000012345678"
+    assert resolve("CBU_BANCARIO_1") == "0170099900000012345678"
+    assert resolve("0170099900000012345678") == "0170099900000012345678"
