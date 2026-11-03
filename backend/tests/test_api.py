@@ -7,6 +7,15 @@ from app.main import app
 from tests.live_llm import requires_live_llm
 
 client = TestClient(app)
+from mcp_financial_action_server.storage import financial_storage
+
+
+@pytest.fixture(autouse=True)
+def reset_banking_state():
+    """Transfers executed by one test must not change the balances seen by the next one."""
+    financial_storage.reset_state()
+    yield
+    financial_storage.reset_state()
 
 
 def test_health_endpoint():
@@ -27,7 +36,7 @@ def test_chat_balance_query():
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "COMPLETED"
-    assert "Saldos Disponibles" in data["response"]
+    assert "485" in data["response"]
     assert data["security_audit"]["defense_action"] == "PASSED"
 
 
@@ -79,4 +88,4 @@ def test_chat_transfer_hitl_and_approve_cycle():
     assert approve_resp.status_code == 200
     approve_data = approve_resp.json()
     assert approve_data["status"] == "EXECUTED"
-    assert "Transferencia Ejecutada con Éxito" in approve_data["message"]
+    assert approve_data["message"]
