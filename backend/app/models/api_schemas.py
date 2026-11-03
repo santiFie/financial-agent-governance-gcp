@@ -46,7 +46,7 @@ class ChatResponse(BaseModel):
     session_id: str
     response: str
     intent: Optional[str] = "unknown"
-    status: Literal["COMPLETED", "BLOCKED", "PENDING_APPROVAL"] = "COMPLETED"
+    status: Literal["COMPLETED", "BLOCKED", "FAILED", "PENDING_APPROVAL"] = "COMPLETED"
     security_audit: SecurityMetadata
     pending_transfer: Optional[PendingTransferInfo] = None
     document_name: Optional[str] = Field(default=None, description="Attached document processed in session")

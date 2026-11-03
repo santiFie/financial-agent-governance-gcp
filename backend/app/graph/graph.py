@@ -33,7 +33,7 @@ def route_after_router(state: AgentState) -> str:
     - Otherwise the first plan step without a result is routed to its executor agent (via the agent registry).
     - When no step is pending (plan finished, empty or blocked), the graph ends.
     """
-    if state.get("is_threat") or state.get("status") == "BLOCKED":
+    if state.get("is_threat") or state.get("status") in ("BLOCKED", "FAILED"):
         return END
 
     scratchpad = state.get("orchestrator_scratchpad") or []

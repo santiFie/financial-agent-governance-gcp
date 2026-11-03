@@ -6,11 +6,10 @@ Plan quality with a real LLM is measured in `test_orchestrator_evals.py`.
 """
 from unittest.mock import MagicMock, patch
 
-import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
 from app.config import settings
-from app.graph.nodes.router import OrchestratorError, router_node
+from app.graph.nodes.router import FAILURE_MESSAGE, router_node
 
 
 def _plan_update_msg(new_steps=None, final_answer=None) -> AIMessage:
@@ -95,6 +94,41 @@ def test_initial_prompt_when_plan_is_empty_and_replan_prompt_otherwise():
     assert "Ya existe un plan de ejecución" in system_replan
 
 
+def test_all_steps_done_and_empty_update_closes_turn_with_final_answer():
+    res, _ = _run({"execution_plan": [_step(1, result="saldo 100")]}, _plan_update_msg(final_answer="Tienes 100."))
+
+    assert res["status"] == "COMPLETED"
+    assert res["final_response"] == "Tienes 100."
+    assert res["execution_plan"][0]["result"] == "saldo 100"
+
+
+def test_empty_update_without_final_answer_fails_the_turn():
+    res, _ = _run({"execution_plan": [_step(1, result="ok")]}, _plan_update_msg())
+
+    assert res["status"] == "FAILED"
+    assert res["final_response"] == FAILURE_MESSAGE
+
+
+def test_tool_rounds_limit_fails_the_turn(monkeypatch):
+    monkeypatch.setattr(settings, "orchestrator_max_tool_iterations", 2)
+    res, _ = _run({"orchestrator_tool_rounds": 2}, _document_call_msg())
+
+    assert res["status"] == "FAILED"
+    assert res["final_response"] == FAILURE_MESSAGE
+
+
+def test_missing_llm_credentials_fail_the_turn():
+    with patch("app.graph.nodes.router.get_chat_model", return_value=None):
+        res = router_node({"sanitized_input": "pedido"})
+
+    assert res["status"] == "FAILED"
+
+
+def test_failed_turn_does_not_call_llm_again():
+    with patch("app.graph.nodes.router.get_chat_model", side_effect=AssertionError("LLM no debe invocarse")):
+        assert router_node({"status": "FAILED"}) == {}
+
+
 def test_empty_plan_with_final_answer_answers_directly():
     res, _ = _run({}, _plan_update_msg(final_answer="Hola"))
 
@@ -136,11 +170,10 @@ def test_document_pii_is_accumulated_in_audit_trail():
     assert pii in res["detected_pii"]
 
 
-def test_unknown_tool_is_rejected():
-    llm, _ = _llm_returning(AIMessage(content="", tool_calls=[{"name": "otra_tool", "args": {}, "id": "x"}]))
-    with patch("app.graph.nodes.router.get_chat_model", return_value=llm):
-        with pytest.raises(OrchestratorError):
-            router_node({"sanitized_input": "pedido"})
+def test_unknown_tool_fails_the_turn():
+    res, _ = _run({}, AIMessage(content="", tool_calls=[{"name": "otra_tool", "args": {}, "id": "x"}]))
+
+    assert res["status"] == "FAILED"
 
 
 def test_context_tells_the_orchestrator_whether_a_document_is_attached():

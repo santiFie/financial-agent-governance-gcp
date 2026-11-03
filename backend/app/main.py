@@ -154,7 +154,7 @@ async def chat_endpoint(request: ChatRequest):
     return ChatResponse(
         session_id=session_id,
         response=final_resp,
-        status="BLOCKED" if is_blocked else "COMPLETED",
+        status="BLOCKED" if is_blocked else ("FAILED" if state_values.get("status") == "FAILED" else "COMPLETED"),
         security_audit=security_audit,
         pending_transfer=None,
         document_name=state_values.get("document_name", request.document_name),

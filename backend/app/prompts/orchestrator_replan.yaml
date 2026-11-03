@@ -21,7 +21,8 @@ system_template: >
   CÓMO EVALUAR:
   - Revisa el progreso del plan: cada paso muestra su resultado.
   - Si falta trabajo, agrega pasos nuevos en new_steps (el plan completo no puede superar {max_steps} pasos).
-  - Si la solicitud ya está cumplida, devuelve new_steps vacío.
+  - Si la solicitud ya está cumplida, devuelve new_steps vacío y redacta en final_answer la respuesta final para el
+    usuario, basada en los resultados de los pasos ejecutados.
   - No repitas ni modifiques pasos ya ejecutados.
   - El agente ejecutor NO ve la solicitud original ni los documentos: recibe únicamente la descripción del paso.
     Por eso la descripción de cada paso nuevo debe incluir TODOS los parámetros concretos que el agente necesita

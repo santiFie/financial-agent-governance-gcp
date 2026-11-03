@@ -27,6 +27,7 @@ def test_ends_when_no_pending_step():
 def test_ends_on_unknown_target_or_threat():
     assert route_after_router({"execution_plan": [_step("nope")]}) == END
     assert route_after_router({"is_threat": True, "execution_plan": [_step("action_agent")]}) == END
+    assert route_after_router({"status": "FAILED", "execution_plan": [_step("action_agent")]}) == END
 
 
 def test_pending_document_tool_call_goes_to_tool_node():

@@ -62,7 +62,10 @@ class PlanUpdate(BaseModel):
     )
     final_answer: Optional[str] = Field(
         default=None,
-        description="Respuesta directa al usuario cuando la solicitud no requiere ningún agente.",
+        description=(
+            "Respuesta final al usuario. Obligatoria cuando new_steps está vacío: responde directamente si la "
+            "solicitud no requiere agentes, o resume los resultados de los pasos ejecutados."
+        ),
     )
 
 
@@ -136,15 +139,32 @@ def _merge_document_pii(state: AgentState, scratchpad: List[Any], fresh_tool_res
     return detected
 
 
+FAILURE_MESSAGE = "No pude completar la solicitud en este momento. Por favor, intenta nuevamente."
+
+
 def router_node(state: AgentState) -> Dict[str, Any]:
-    """Orchestrator Agent node. See module docstring for the per-invocation contract."""
+    """Orchestrator Agent node. Unrecoverable Orchestrator errors end the turn with status FAILED."""
+    try:
+        return _orchestrate(state)
+    except OrchestratorError as e:
+        logger.error(f"[Orchestrator] {e}")
+        return {
+            "status": "FAILED",
+            "final_response": FAILURE_MESSAGE,
+            "orchestrator_tool_rounds": 0,
+            "messages": [AIMessage(content=FAILURE_MESSAGE)],
+        }
+
+
+def _orchestrate(state: AgentState) -> Dict[str, Any]:
+    """See module docstring for the per-invocation contract."""
     scratchpad = list(state.get("orchestrator_scratchpad") or [])
 
     blocked = _blocked_document_artifact(scratchpad)
     if blocked:
         return _threat_update(state, blocked)
 
-    if state.get("is_threat") or state.get("status") == "BLOCKED":
+    if state.get("is_threat") or state.get("status") in ("BLOCKED", "FAILED"):
         return {}
 
     if get_active_step(state) is not None:
@@ -159,9 +179,10 @@ def router_node(state: AgentState) -> Dict[str, Any]:
         agents_catalog=render_agents_catalog(),
         max_steps=settings.orchestrator_max_plan_steps,
     )
-    llm = get_chat_model(temperature=0.0).bind_tools(
-        [read_document_tool, PlanUpdate], tool_choice="any"
-    )
+    base_llm = get_chat_model(temperature=0.0)
+    if base_llm is None:
+        raise OrchestratorError("No hay credenciales LLM configuradas para el Orquestador.")
+    llm = base_llm.bind_tools([read_document_tool, PlanUpdate], tool_choice="any")
     ai_msg = llm.invoke(
         [SystemMessage(content=system_prompt), HumanMessage(content=_build_context(state))] + scratchpad
     )
@@ -213,9 +234,10 @@ def router_node(state: AgentState) -> Dict[str, Any]:
         "orchestrator_tool_rounds": 0,
         "detected_pii": _merge_document_pii(state, scratchpad, rounds > 0),
     }
-    if plan and not new_steps:
-        output["status"] = "COMPLETED"  # every step has a result and the Orchestrator has nothing left to add
-    if not plan and not new_steps and update.final_answer:
+    if not new_steps:
+        # Nothing left to delegate: the Orchestrator closes the turn with the final answer for the user.
+        if not (update.final_answer or "").strip():
+            raise OrchestratorError("El Orquestador terminó sin new_steps ni final_answer.")
         output["final_response"] = update.final_answer
         output["status"] = "COMPLETED"
         output["messages"] = [AIMessage(content=update.final_answer)]
