@@ -89,17 +89,11 @@ class DocumentIngestionService:
         else:
             target_path = (self.base_dir / document_name).resolve()
 
-        try:
-            if not target_path.is_relative_to(self.base_dir):
-                raise ValueError(
-                    f"Intento de path traversal detectado para el documento: '{document_name}'"
-                )
-        except AttributeError:
-            # Python < 3.9 fallback
-            if os.path.commonpath([str(target_path), str(self.base_dir)]) != str(self.base_dir):
-                raise ValueError(
-                    f"Intento de path traversal detectado para el documento: '{document_name}'"
-                )
+
+        if not target_path.is_relative_to(self.base_dir):
+            raise ValueError(
+                f"Intento de path traversal detectado para el documento: '{document_name}'"
+            )
 
         if not target_path.exists():
             raise FileNotFoundError(f"Documento no encontrado: {document_name} en {self.base_dir}")

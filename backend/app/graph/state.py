@@ -28,17 +28,17 @@ class AgentState(TypedDict):
     threat_reason: Optional[str]
     defense_action: str  # "PASSED" | "DEIDENTIFIED" | "BLOCKED"
 
-    # Multimodal / Document Ingestion Context (Stream A)
+    # Attached document reference (name only; content is read by the Orchestrator through read_document_tool)
     document_name: Optional[str] = None
-    raw_document: Optional[str] = None
-    sanitized_document: Optional[str] = None
 
-    # Routing, Planning & Business Logic (Stream A)
-    current_intent: Optional[str]  # "general" | "balance" | "transactions" | "transfer" | "blocked"
+    # Orchestrator Agent: append-only execution plan and tool-calling scratchpad.
+    # The scratchpad uses the add_messages reducer so ToolNode can append ToolMessages;
+    # it is reset every turn by the sanitizer with RemoveMessage(REMOVE_ALL_MESSAGES).
     execution_plan: Optional[List[Dict[str, Any]]] = None
-    delegated_instructions: Optional[str] = None
+    orchestrator_scratchpad: Annotated[List[BaseMessage], add_messages]
+    orchestrator_tool_rounds: Optional[int] = 0
 
-    # Action / HITL Staging & Governance (Stream B)
+    # Action / HITL Staging & Governance
     pending_transfer: Optional[Dict[str, Any]]
     approval_status: Optional[str]  # "NONE" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED"
     pending_tool_calls: Optional[List[Dict[str, Any]]] = None

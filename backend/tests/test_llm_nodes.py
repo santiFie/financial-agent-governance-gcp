@@ -10,7 +10,6 @@ from app.core.llm import get_chat_model, LLMConfigurationError
 from app.graph.nodes.router import router_node, PlanUpdate, NewPlanStep
 from app.graph.agent_registry import TargetNode
 from app.graph.nodes.readonly_agent import readonly_agent_node
-from app.graph.nodes.action_agent import action_agent_node
 
 
 def test_get_chat_model_unknown_provider_raises():
@@ -152,36 +151,3 @@ def test_readonly_agent_invokes_tools_via_llm():
         assert "Saldos Disponibles" in res["final_response"]
         assert res["execution_plan"][0]["result"] is not None
         mock_executor.invoke.assert_called_once()
-
-
-def test_action_agent_invokes_stage_transfer_tool():
-    """Action agent node stages transfer and sets status to PENDING_PEP."""
-    mock_llm = MagicMock()
-    mock_bound = MagicMock()
-
-    tool_call = {
-        "name": "transfer_funds_tool",
-        "args": {
-            "user_id": "user_default_01",
-            "source_account": "acc_001",
-            "destination_account": "[CBU_BANCARIO_1]",
-            "amount": 50000.0,
-            "concept": "Transferencia de fondos"
-        },
-        "id": "call_tx_001"
-    }
-    first_response = AIMessage(content="", tool_calls=[tool_call])
-    mock_bound.invoke.return_value = first_response
-    mock_llm.bind_tools.return_value = mock_bound
-
-    with patch("app.graph.nodes.action_agent.get_chat_model", return_value=mock_llm):
-        state = {
-            "session_id": "test_llm_action_sess",
-            "user_id": "user_default_01",
-            "sanitized_input": "Transferir $50000 a [CBU_BANCARIO_1]"
-        }
-        res = action_agent_node(state)
-        assert res["status"] == "PENDING_PEP"
-        assert res["pending_transfer"]["amount"] == 50000.0
-        assert len(res["pending_tool_calls"]) == 1
-

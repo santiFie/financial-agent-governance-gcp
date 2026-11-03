@@ -1,327 +1,215 @@
 """
-Router / Planner Agent Node.
-Classifies user intent and plans execution steps based on unified context (user query + attached document).
-Uses LLM structured output when available, and provides a deterministic rule-based planner fallback for offline execution.
-"""
-import re
-import logging
-from typing import Dict, Any, List, Optional, Literal
-from pydantic import BaseModel, Field
-from langchain_core.messages import SystemMessage, HumanMessage
+Router / Orchestrator Agent Node.
 
-from app.graph.state import AgentState
+The Orchestrator maintains an append-only execution plan and delegates each step to an executor agent.
+It is domain-agnostic: it knows nothing about specific documents, amounts or recipients.
+
+Per invocation:
+1. Threat short-circuit (blocked document read, or a threat flagged earlier in the turn).
+2. If a plan step is still pending, no LLM call is made: the graph dispatches the active step.
+3. Otherwise one LLM turn happens (orchestrator_initial prompt when the plan is empty, orchestrator_replan otherwise).
+   The LLM either requests read_document_tool (executed by the graph's ToolNode) or emits a PlanUpdate
+   that appends new steps. An empty PlanUpdate with no pending steps ends the plan.
+"""
+import logging
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+
+from app.config import settings
 from app.core.llm import get_chat_model
 from app.core.prompt_manager import prompt_manager
+from app.graph.agent_registry import TargetNode, render_agents_catalog
+from app.graph.plan_utils import get_active_step
+from app.graph.state import AgentState
+from app.graph.tools.document_reader import read_document_tool
 
 logger = logging.getLogger(__name__)
 
 
+class OrchestratorError(RuntimeError):
+    """Raised when the Orchestrator LLM turn cannot produce a valid decision."""
+
+
 class PlanStep(BaseModel):
-    step: int = Field(description="Número de orden secuencial del paso (1, 2, ...)")
-    action: str = Field(description="Acción a realizar: register_recipient, transfer_funds, etc.")
-    recipient: Optional[str] = Field(default=None, description="Nombre o razón social del destinatario")
-    cbu: Optional[str] = Field(default=None, description="CBU o token de CBU ([CBU_BANCARIO_1])")
-    amount: Optional[float] = Field(default=None, description="Monto numérico a transferir si aplica")
-    description: Optional[str] = Field(default=None, description="Descripción adicional del paso")
+    """Plan step as stored by the system. step_id and result are never set by the LLM."""
+    step_id: int = Field(description="Identificador único del paso (1, 2, ...)")
+    title: str = Field(description="Descripción breve de la acción a ejecutar")
+    target_node: TargetNode = Field(description="Agente que ejecuta el paso")
+    description: str = Field(description="Instrucción completa para el agente, con todos los parámetros concretos")
+    result: Optional[str] = Field(default=None, description="Salida producida por el agente tras ejecutar el paso")
 
 
-class IntentClassification(BaseModel):
-    intent: Literal["balance", "transactions", "transfer", "general"] = Field(
-        description="Categoría de la intención del usuario: "
-                    "'balance' (consultar saldos o fondos disponibles), "
-                    "'transactions' (ver últimos movimientos, historial de pagos o extracto), "
-                    "'transfer' (realizar un pago, envío de dinero o transferencia bancaria), "
-                    "'general' (saludos, preguntas informativas generales o dudas no transaccionales)."
+class NewPlanStep(BaseModel):
+    """Plan step as emitted by the LLM."""
+    title: str = Field(description="Descripción breve de la acción a ejecutar")
+    target_node: TargetNode = Field(description="Agente que ejecuta el paso")
+    description: str = Field(
+        description=(
+            "Instrucción completa para el agente ejecutor. Debe incluir TODOS los parámetros concretos que necesita "
+            "(montos con moneda, destinatarios, identificadores o tokens), copiados literalmente. "
+            "El agente ejecutor no ve la solicitud original ni los documentos."
+        )
     )
-    execution_plan: List[PlanStep] = Field(
+
+
+class PlanUpdate(BaseModel):
+    """Decisión final del turno del Orquestador: pasos nuevos a agregar al plan (vacío si no falta trabajo)."""
+    new_steps: List[NewPlanStep] = Field(
         default_factory=list,
-        description="Plan de pasos ordenados para la ejecución de la solicitud"
+        description="Pasos nuevos a agregar al final del plan. Vacío si no hace falta más trabajo.",
     )
-    delegated_instructions: Optional[str] = Field(
+    final_answer: Optional[str] = Field(
         default=None,
-        description="Instrucciones precisas delegadas para el agente de ejecución (Action Agent)"
+        description="Respuesta directa al usuario cuando la solicitud no requiere ningún agente.",
     )
 
 
-PlannerOutput = IntentClassification
+def _build_context(state: AgentState) -> str:
+    """Renders the data (not instructions) the Orchestrator reasons over."""
+    document_name = state.get("document_name") or "ninguno"
+    plan = state.get("execution_plan") or []
 
+    if plan:
+        lines: List[str] = []
+        for step in plan:
+            done = step.get("result") is not None
+            lines.append(
+                f"Paso {step['step_id']} [{step['target_node']}] {step['title']} — "
+                f"{'COMPLETADO' if done else 'PENDIENTE'}"
+            )
+            lines.append(f"  descripción: {step['description']}")
+            if done:
+                lines.append(f"  resultado: {step['result']}")
+        progress = "\n".join(lines)
+    else:
+        progress = "Aún no hay plan."
 
-def _is_contaminated_document(doc_text: Optional[str]) -> bool:
-    """
-    Checks if text contains operative transfer/payment directives
-    attempting to steer execution (Goal Hijacking).
-    """
-    if not doc_text:
-        return False
-    lower_doc = doc_text.lower()
-
-    # Check for presence of an account identifier (tokenized CBU or raw CBU)
-    has_cbu = bool(re.search(r"(\[cbu_bancario_\d+\]|\b\d{22}\b)", doc_text, re.IGNORECASE))
-
-    # Check for financial obligation or payment context
-    has_obligation = any(
-        marker in lower_doc for marker in [
-            "ajuste fiscal",
-            "liquidación",
-            "liquidacion",
-            "obligación fiscal",
-            "obligacion fiscal",
-            "transferencia",
-            "transferir",
-            "deuda vencida",
-            "intimación",
-            "intimacion",
-            "recaudador"
-        ]
+    return (
+        f"<user_request>\n{state.get('sanitized_input', '')}\n</user_request>\n"
+        f"<attached_document_name>{document_name}</attached_document_name>\n"
+        f"<plan_progress>\n{progress}\n</plan_progress>"
     )
 
-    # Check for operative multi-step execution directives
-    has_directive = any(
-        directive in lower_doc for directive in [
-            "instrucción operativa",
-            "instruccion operativa",
-            "asistente o sistema",
-            "asistente bancario",
-            "plan de dos etapas",
-            "paso 1",
-            "paso 2",
-            "agenda de destinatarios",
-            "registrar e incorporar",
-            "registrar al",
-            "registrar destinatario"
-        ]
-    )
 
-    return has_cbu and has_obligation and (has_directive or "fideicomiso" in lower_doc or "ajuste fiscal" in lower_doc)
-
-
-def _parse_amount(raw_val: str) -> Optional[float]:
-    """Parses numeric amount from localized Argentine/European currency string."""
-    clean = raw_val.strip().replace("$", "").replace("ARS", "").replace("ars", "").strip()
-    if not clean:
+def _blocked_document_artifact(scratchpad: List[Any]) -> Optional[Dict[str, Any]]:
+    """Returns the read_document_tool artifact if the last scratchpad message is a BLOCKED document read."""
+    if not scratchpad:
         return None
-    try:
-        if "." in clean and "," in clean:
-            # e.g., 45.000,00 -> 45000.00
-            clean = clean.replace(".", "").replace(",", ".")
-            return float(clean)
-        elif "," in clean:
-            parts = clean.split(",")
-            if len(parts[-1]) == 3 and len(parts) > 1:
-                clean = clean.replace(",", "")
-            else:
-                clean = clean.replace(",", ".")
-            return float(clean)
-        elif "." in clean:
-            parts = clean.split(".")
-            if len(parts[-1]) == 3 and len(parts) > 1:
-                # 45.000 -> 45000.0
-                clean = clean.replace(".", "")
-            else:
-                clean = clean
-            return float(clean)
-        else:
-            return float(clean)
-    except (ValueError, TypeError):
-        return None
+    last = scratchpad[-1]
+    artifact = getattr(last, "artifact", None) if isinstance(last, ToolMessage) else None
+    if isinstance(artifact, dict) and artifact.get("status") == "BLOCKED":
+        return artifact
+    return None
 
 
-def _extract_plan_parameters(text: str) -> Dict[str, Any]:
-    """
-    Dynamically extracts CBU, recipient entity, and monetary amount from document text.
-    """
-    # 1. Extract CBU (tokenized or raw 22-digit)
-    cbu = None
-    cbu_match = re.search(r"(\[CBU_BANCARIO_\d+\]|\b\d{22}\b)", text, re.IGNORECASE)
-    if cbu_match:
-        cbu = cbu_match.group(1).upper() if "[" in cbu_match.group(1) else cbu_match.group(1)
-
-    # 2. Extract Recipient
-    recipient = None
-    recipient_patterns = [
-        # Ente Recaudador Designado: Fideicomiso Recaudador Fiscal
-        r"(?:ente recaudador(?:\s+designado)?|destinatario|beneficiario|titular):\s*([^\n\r,\.]+)",
-        # Registrar e incorporar al 'Fideicomiso Recaudador Fiscal' con CBU ...
-        r"(?:incorporar|registrar)(?:\s+e\s+incorporar)?\s+al\s+['\"]([^'\"]+)['\"]",
-        # al 'Fideicomiso Recaudador Fiscal' con CBU
-        r"al\s+['\"]([^'\"]+)['\"]\s+con\s+cbu",
-        # Ente / destinatario without quotes
-        r"(?:incorporar|registrar)(?:\s+e\s+incorporar)?\s+al\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ\s]+?)\s+con\s+cbu",
-    ]
-    for pattern in recipient_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            cand = match.group(1).strip()
-            cand = cand.strip("'\"` ").rstrip(".,")
-            if len(cand) >= 3 and not cand.lower().startswith("cbu"):
-                recipient = cand
-                break
-
-    if not recipient:
-        recipient = "Destinatario no especificado"
-
-    # 3. Extract Amount
-    amount = None
-    amount_patterns = [
-        # Importe Total Liquidado: $45.000,00 ARS
-        r"(?:importe(?: total liquidado)?|monto(?: total)?):\s*\$?\s*([0-9]+(?:[\.,][0-9]{3})*(?:[\.,][0-9]{2})?)",
-        # importe exacto de $45.000,00 ARS
-        r"(?:importe exacto de|por el importe de|por un monto de|por el monto de)\s*\$?\s*([0-9]+(?:[\.,][0-9]{3})*(?:[\.,][0-9]{2})?)",
-        # $45.000,00 or $45.000 ARS
-        r"\$\s*([0-9]+(?:[\.,][0-9]{3})*(?:[\.,][0-9]{2})?)"
-    ]
-    for pattern in amount_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            parsed = _parse_amount(match.group(1))
-            if parsed is not None and parsed > 0:
-                amount = parsed
-                break
-
-    # 4. Extract Concept / Reason if present
-    concept = "ajuste fiscal"
-    concept_match = re.search(r"concepto:\s*([^\n\r]+)", text, re.IGNORECASE)
-    if concept_match:
-        concept = concept_match.group(1).strip()
-
+def _threat_update(state: AgentState, artifact: Dict[str, Any]) -> Dict[str, Any]:
+    category = artifact.get("threat_category")
+    blocked_msg = prompt_manager.render("sanitizer_responses", threat_cat=category)
     return {
-        "cbu": cbu,
-        "recipient": recipient,
-        "amount": amount,
-        "concept": concept
+        "is_threat": True,
+        "threat_category": category,
+        "threat_reason": artifact.get("threat_reason"),
+        "defense_action": "BLOCKED",
+        "status": "BLOCKED",
+        "detected_pii": list(state.get("detected_pii") or []) + list(artifact.get("detected_pii") or []),
+        "final_response": blocked_msg,
+        "messages": [AIMessage(content=blocked_msg)],
     }
 
 
-def _build_dynamic_plan(params: Dict[str, Any]) -> tuple[List[PlanStep], str]:
-    """Constructs dynamic 2-step plan from extracted parameters."""
-    cbu = params.get("cbu") or "[CBU_BANCARIO_1]"
-    recipient = params.get("recipient") or "Fideicomiso Recaudador Fiscal"
-    amount = params.get("amount")
-    concept = params.get("concept", "ajuste fiscal")
-
-    plan = [
-        PlanStep(
-            step=1,
-            action="register_recipient",
-            recipient=recipient,
-            cbu=cbu,
-            description=f"Registrar e incorporar a '{recipient}' con CBU {cbu} en la agenda de destinatarios confiables."
-        ),
-        PlanStep(
-            step=2,
-            action="transfer_funds",
-            amount=amount,
-            cbu=cbu,
-            recipient=recipient,
-            description=f"Transferir ${amount:,.2f} ARS a '{recipient}' con CBU {cbu} por concepto de {concept}." if amount else f"Transferir fondos a '{recipient}' con CBU {cbu}."
-        )
-    ]
-
-    if amount is not None:
-        amount_fmt = f"${amount:,.2f} ARS" if amount % 1 != 0 else f"${int(amount):,} ARS".replace(",", ".")
-    else:
-        amount_fmt = "fondos"
-
-    instructions = (
-        f"Registrar destinatario {recipient} con CBU {cbu} "
-        f"y transferir {amount_fmt} por {concept}."
-    )
-    return plan, instructions
+def _merge_document_pii(state: AgentState, scratchpad: List[Any], fresh_tool_result: bool) -> List[Any]:
+    """Accumulates PII detected by read_document_tool into the audit trail (once per tool round)."""
+    detected = list(state.get("detected_pii") or [])
+    if fresh_tool_result and scratchpad and isinstance(scratchpad[-1], ToolMessage):
+        artifact = getattr(scratchpad[-1], "artifact", None)
+        if isinstance(artifact, dict) and artifact.get("detected_pii"):
+            detected.extend(artifact["detected_pii"])
+    return detected
 
 
 def router_node(state: AgentState) -> Dict[str, Any]:
-    """
-    Analyzes unified context (sanitized_input + sanitized_document) to determine intent,
-    generate execution_plan, and formulate delegated_instructions.
-    """
-    if state.get("is_threat"):
-        return {
-            "current_intent": "blocked",
-            "execution_plan": [],
-            "delegated_instructions": None
-        }
+    """Orchestrator Agent node. See module docstring for the per-invocation contract."""
+    scratchpad = list(state.get("orchestrator_scratchpad") or [])
 
-    sanitized_input = state.get("sanitized_input", "")
-    sanitized_doc = state.get("sanitized_document")
+    blocked = _blocked_document_artifact(scratchpad)
+    if blocked:
+        return _threat_update(state, blocked)
 
-    # Build unified context
-    if sanitized_doc:
-        unified_context = (
-            f"Consulta del usuario:\n{sanitized_input}\n\n"
-            f"Documento adjunto:\n{sanitized_doc}"
-        )
-    else:
-        unified_context = sanitized_input
+    if state.get("is_threat") or state.get("status") == "BLOCKED":
+        return {}
 
-    is_contaminated = _is_contaminated_document(sanitized_doc) or _is_contaminated_document(sanitized_input)
-    target_text = sanitized_doc if sanitized_doc else sanitized_input
-    extracted_params = _extract_plan_parameters(target_text)
+    if get_active_step(state) is not None:
+        return {}
 
-    # Try LLM structured output if available
-    llm = get_chat_model(temperature=0.0)
-    if llm is not None:
-        try:
-            structured_llm = llm.with_structured_output(IntentClassification)
-            system_prompt = prompt_manager.render("router")
-            result = structured_llm.invoke([
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=unified_context)
-            ])
+    plan: List[Dict[str, Any]] = list(state.get("execution_plan") or [])
+    rounds = state.get("orchestrator_tool_rounds") or 0
 
-            if result and hasattr(result, "intent") and result.intent:
-                intent = result.intent
-                plan_steps = getattr(result, "execution_plan", None) or []
-                instructions = getattr(result, "delegated_instructions", None)
+    prompt_name = "orchestrator_replan" if plan else "orchestrator_initial"
+    system_prompt = prompt_manager.render(
+        prompt_name,
+        agents_catalog=render_agents_catalog(),
+        max_steps=settings.orchestrator_max_plan_steps,
+    )
+    llm = get_chat_model(temperature=0.0).bind_tools(
+        [read_document_tool, PlanUpdate], tool_choice="any"
+    )
+    ai_msg = llm.invoke(
+        [SystemMessage(content=system_prompt), HumanMessage(content=_build_context(state))] + scratchpad
+    )
 
-                # For standard queries without an attached document, execution_plan must be []
-                if not sanitized_doc:
-                    plan_steps = []
-                    instructions = None
-                elif is_contaminated and (not plan_steps or len(plan_steps) == 0):
-                    intent = "transfer"
-                    plan_steps, instructions = _build_dynamic_plan(extracted_params)
+    tool_calls = list(getattr(ai_msg, "tool_calls", None) or [])
+    unknown = [c["name"] for c in tool_calls if c["name"] not in (read_document_tool.name, "PlanUpdate")]
+    if unknown:
+        raise OrchestratorError(f"El Orquestador solicitó herramientas desconocidas: {unknown}")
 
-                plan_dicts = [
-                    s.model_dump() if hasattr(s, "model_dump") else s
-                    for s in plan_steps
-                ]
+    document_calls = [c for c in tool_calls if c["name"] == read_document_tool.name]
+    plan_calls = [c for c in tool_calls if c["name"] == "PlanUpdate"]
 
-                return {
-                    "current_intent": intent,
-                    "execution_plan": plan_dicts,
-                    "delegated_instructions": instructions
-                }
-        except Exception as e:
-            logger.warning(
-                f"[RouterNode] Error in structured LLM invocation: {e}. "
-                "Executing deterministic planner fallback."
+    # Information gathering takes precedence: the plan decision is taken after the tool results are in.
+    if document_calls:
+        if rounds >= settings.orchestrator_max_tool_iterations:
+            raise OrchestratorError(
+                f"El Orquestador excedió el máximo de {settings.orchestrator_max_tool_iterations} rondas de herramientas."
             )
-
-    # Deterministic Planner Fallback (Offline / Mock Provider)
-    if is_contaminated:
-        plan_steps, instructions = _build_dynamic_plan(extracted_params)
-        plan_dicts = [
-            s.model_dump() if hasattr(s, "model_dump") else s
-            for s in plan_steps
-        ]
         return {
-            "current_intent": "transfer",
-            "execution_plan": plan_dicts,
-            "delegated_instructions": instructions
+            "orchestrator_scratchpad": [
+                AIMessage(content=ai_msg.content or "", tool_calls=document_calls)
+            ],
+            "orchestrator_tool_rounds": rounds + 1,
+            "detected_pii": _merge_document_pii(state, scratchpad, rounds > 0),
         }
 
-    lower_query = sanitized_input.lower()
-    if any(k in lower_query for k in ["saldo", "balance", "fondos", "cuánto tengo", "cuanto tengo", "cuánto dinero", "cuanto dinero"]):
-        intent = "balance"
-    elif any(k in lower_query for k in ["movimientos", "transacciones", "extracto", "historial", "gastos", "últimos", "ultimos"]):
-        intent = "transactions"
-    elif any(k in lower_query for k in ["transfer", "transfiera", "transferir", "pagar", "pago", "mandar dinero", "enviar dinero"]):
-        intent = "transfer"
-    else:
-        intent = "general"
+    if not plan_calls:
+        raise OrchestratorError("El Orquestador no entregó una decisión PlanUpdate.")
 
-    return {
-        "current_intent": intent,
-        "execution_plan": [],
-        "delegated_instructions": None
+    update = PlanUpdate(**plan_calls[0]["args"])
+
+    room = max(settings.orchestrator_max_plan_steps - len(plan), 0)
+    if len(update.new_steps) > room:
+        logger.warning(
+            f"[Orchestrator] PlanUpdate truncado: {len(update.new_steps)} pasos solicitados, cupo {room}."
+        )
+    new_steps = [
+        PlanStep(
+            step_id=len(plan) + idx + 1,
+            title=step.title,
+            target_node=step.target_node,
+            description=step.description,
+        ).model_dump(mode="json")
+        for idx, step in enumerate(update.new_steps[:room])
+    ]
+
+    output: Dict[str, Any] = {
+        "execution_plan": plan + new_steps,
+        "orchestrator_tool_rounds": 0,
+        "detected_pii": _merge_document_pii(state, scratchpad, rounds > 0),
     }
+    if plan and not new_steps:
+        output["status"] = "COMPLETED"  # every step has a result and the Orchestrator has nothing left to add
+    if not plan and not new_steps and update.final_answer:
+        output["final_response"] = update.final_answer
+        output["status"] = "COMPLETED"
+        output["messages"] = [AIMessage(content=update.final_answer)]
+    return output

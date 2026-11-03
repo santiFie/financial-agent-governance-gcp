@@ -4,6 +4,7 @@ Tests for FastAPI REST Endpoints.
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
+from tests.live_llm import requires_live_llm
 
 client = TestClient(app)
 
@@ -16,6 +17,7 @@ def test_health_endpoint():
     assert "security_mode" in data
 
 
+@requires_live_llm
 def test_chat_balance_query():
     payload = {
         "message": "Hola, ¿podrías indicarme el saldo de mis cuentas?",
@@ -29,6 +31,7 @@ def test_chat_balance_query():
     assert data["security_audit"]["defense_action"] == "PASSED"
 
 
+@requires_live_llm
 def test_chat_pii_sanitization():
     payload = {
         "message": "Mi número de tarjeta es 4545-9876-1234-5678, ¿qué saldo tengo?",
@@ -43,6 +46,7 @@ def test_chat_pii_sanitization():
     assert "4545-9876-1234-5678" not in data["security_audit"]["sanitized_input"]
 
 
+@requires_live_llm
 def test_chat_transfer_hitl_and_approve_cycle():
     session_id = "test_api_transfer_cycle"
 

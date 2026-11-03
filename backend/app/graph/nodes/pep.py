@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage
 from langgraph.types import interrupt
 
 from app.graph.state import AgentState
+from app.graph.plan_utils import complete_active_step
 from app.config import settings
 from app.db.mock_banking import mock_banking_db
 from app.core.security_context import token_vault
@@ -23,6 +24,11 @@ class AwaitableDict(dict):
         return _identity().__await__()
 
 
+def _mark_current_step_completed(state: AgentState, result_text: str) -> List[Dict[str, Any]]:
+    """Marks the active plan step as completed (transfer steps are completed by the PEP)."""
+    return complete_active_step(state, result_text)
+
+
 def pep_node(state: AgentState) -> AwaitableDict:
     """
     Policy Enforcement Point (PEP) Node.
@@ -33,6 +39,8 @@ def pep_node(state: AgentState) -> AwaitableDict:
        - Fast-Path (allow=True, require_hitl=False): executes direct transfer without interrupt().
        - HITL (require_hitl=True): stages transfer in mock banking and halts at interrupt().
        - Resumes on approval and finalizes transfer.
+    5. Marks the active step in execution_plan as completed before looping back to the Orchestrator.
+       Steps that stage no transfer are completed by the Action Agent itself, so nothing is pending here.
     """
     pending_tool_calls: List[Dict[str, Any]] = list(state.get("pending_tool_calls") or [])
     pending_transfer = state.get("pending_transfer")
@@ -53,7 +61,7 @@ def pep_node(state: AgentState) -> AwaitableDict:
     # Extract transfer details from pending_tool_calls
     for tool_call in pending_tool_calls:
         tc_name = tool_call.get("name")
-        if tc_name in ["transfer_funds_tool", "stage_transfer_request"]:
+        if tc_name in ["transfer_funds_tool"]:
             args = tool_call.get("args", {})
             amount = float(args.get("amount", 0.0))
             destination = str(
@@ -150,6 +158,7 @@ def pep_node(state: AgentState) -> AwaitableDict:
             "is_threat": True,
             "pending_tool_calls": [],
             "pending_transfer": None,
+            "execution_plan": _mark_current_step_completed(state, block_msg),
             "messages": [AIMessage(content=block_msg)],
         })
 
@@ -179,6 +188,7 @@ def pep_node(state: AgentState) -> AwaitableDict:
             "approval_status": "APPROVED",
             "pending_tool_calls": [],
             "pending_transfer": None,
+            "execution_plan": _mark_current_step_completed(state, msg),
             "messages": [AIMessage(content=msg)],
         })
 
@@ -265,5 +275,6 @@ def pep_node(state: AgentState) -> AwaitableDict:
         "approval_status": approval_status,
         "pending_transfer": staged,
         "pending_tool_calls": [],
+        "execution_plan": _mark_current_step_completed(state, msg),
         "messages": [AIMessage(content=msg)],
     })

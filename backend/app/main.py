@@ -140,7 +140,6 @@ async def chat_endpoint(request: ChatRequest):
                 "Por política de seguridad bancaria, esta operación requiere autorización humana previa "
                 "por parte del oficial de cumplimiento antes de impactar los fondos."
             ),
-            intent="transfer",
             status="PENDING_APPROVAL",
             security_audit=security_audit,
             pending_transfer=pending_info,
@@ -155,7 +154,6 @@ async def chat_endpoint(request: ChatRequest):
     return ChatResponse(
         session_id=session_id,
         response=final_resp,
-        intent=state_values.get("current_intent", "general"),
         status="BLOCKED" if is_blocked else "COMPLETED",
         security_audit=security_audit,
         pending_transfer=None,

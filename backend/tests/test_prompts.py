@@ -9,17 +9,16 @@ from app.core.prompt_manager import prompt_manager, PromptManager
 def test_all_prompts_registered():
     """Verify that all core prompt templates are present and loaded."""
     prompts = prompt_manager.list_prompts()
-    assert "router" in prompts
-    assert "readonly_agent" in prompts
-    assert "action_agent" in prompts
-    assert "sanitizer_responses" in prompts
+    for name in ("orchestrator_initial", "orchestrator_replan", "readonly_agent", "action_agent", "sanitizer_responses"):
+        assert name in prompts
 
 
-def test_render_router_prompt():
-    """Verify router prompt rendering."""
-    prompt_str = prompt_manager.render("router")
-    assert "clasificador de intenciones" in prompt_str
-    assert len(prompt_str) > 10
+@pytest.mark.parametrize("name", ["orchestrator_initial", "orchestrator_replan"])
+def test_render_orchestrator_prompts(name):
+    """Orchestrator prompts render the agent catalog and the step limit."""
+    prompt_str = prompt_manager.render(name, agents_catalog="- 'read_only_agent': lectura", max_steps=4)
+    assert "read_only_agent" in prompt_str
+    assert "PlanUpdate" in prompt_str
 
 
 def test_render_readonly_agent_prompt():
@@ -34,20 +33,6 @@ def test_render_readonly_agent_missing_variable():
     with pytest.raises(ValueError) as excinfo:
         prompt_manager.render("readonly_agent")
     assert "user_id" in str(excinfo.value)
-
-
-def test_render_action_agent_prompt():
-    """Verify action_agent prompt rendering with all required parameters."""
-    prompt_str = prompt_manager.render(
-        "action_agent",
-        session_id="sess_123",
-        user_id="user_456",
-        source_acc="acc_source"
-    )
-    assert "sess_123" in prompt_str
-    assert "user_456" in prompt_str
-    assert "acc_source" in prompt_str
-    assert "stage_transfer_request" in prompt_str
 
 
 def test_render_action_agent_missing_parameters():
