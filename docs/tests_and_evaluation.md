@@ -11,6 +11,12 @@ Este documento detalla la estructura, propósito, dependencias y comportamiento 
 | **`tests/test_sanitizer.py`** | Unitaria / Heurística | ❌ **No** | ❌ No (Offline) | `DlpSanitizer`, `TokenVault`, `ModelArmor` |
 | **`tests/test_llm_nodes.py`** | Unitaria con Mocks | ❌ **No** | ❌ No (Offline) | `LLM Factory`, `router_node`, `readonly_agent_node`, `action_agent_node` |
 | **`tests/test_readonly_agent_evals.py`** | Evals con LLM Real / Tool-Calling | ✅ **SÍ** | 🌐 Sí (Groq/Gemini/NIM) | `readonly_agent_node`, `PlanStep`, LangSmith Tracing |
+| **`tests/test_router_planner.py`** | Unitaria con Mocks | ❌ **No** | ❌ No (Offline) | `router_node` (mecánica del plan, límites, `FAILED`, contexto de documento) |
+| **`tests/test_document_loader.py`** | Unitaria | ❌ **No** | ❌ No (Offline) | `DocumentIngestionService` (`local_storage` / GCS con fallback) |
+| **`tests/test_graph_routing.py`** | Unitaria | ❌ **No** | ❌ No (Offline) | `route_after_router`, agent registry |
+| **`tests/test_action_multitool.py`** / **`tests/test_pep_node.py`** | Unitaria con Mocks | ❌ **No** | ❌ No (Offline) | `action_agent_node` (staging), `pep_node` (Fast-Path / HITL) |
+| **`tests/test_orchestrator_evals.py`** | Evals con LLM Real + LangSmith | ✅ **SÍ** | 🌐 Sí | Calidad del plan del Orchestrator (dataset `orchestrator-plan-evals`) |
+| **`tests/test_attack_3_1_e2e_evals.py`** | Medición E2E con LLM Real + LangSmith | ✅ **SÍ** | 🌐 Sí | Grafo completo, escenario 3.1 (dataset `attack-3-1-scenarios`) |
 | **`tests/test_graph_flow.py`** | Integración LangGraph | ⚠️ **Parcial (2 de 3)** | 🌐 Sí (si no se usa mock) | `financial_graph`, Checkpointer, Breakpoints HITL |
 | **`tests/test_api.py`** | Integración Endpoints REST | ⚠️ **Parcial (3 de 4)** | 🌐 Sí (si no se usa mock) | FastAPI (`/api/chat`, `/api/approve`, `/api/health`) |
 
@@ -168,6 +174,19 @@ Prueba las rutas expuestas hacia el cliente o frontend web usando `TestClient`.
     2. `GET /api/pending-transfers` (inspección de transferencias en espera por el oficial de cumplimiento).
     3. `POST /api/approve` (aprobación humana que reanuda LangGraph -> estado `EXECUTED`).
   * **¿Invoca Modelo?:**  **SÍ**.
+
+---
+
+### E. `tests/test_orchestrator_evals.py` (Evals del Orchestrator)
+
+Ground truth en `tests/data/orchestrator_ground_truth.json`. Corre el router y el `ToolNode` de documentos de producción (sin ejecutores) y evalúa el plan resultante:
+* `plan_targets_match`, `plan_params_copied`, `plan_within_limits` (deterministas) y `plan_grounded_in_request` (TypeSafe Jev), definidos en `backend/decision_models_evaluators.py`.
+* El caso `orchestrator_adversarial_document_measured` (documento de `local_storage`) solo se mide.
+* Para cambiar el documento en un caso se usa `document_fixture` (archivo de `tests/fixtures/documents/`), que sobrescribe `settings.local_document_path` durante la corrida.
+
+### F. `tests/test_attack_3_1_e2e_evals.py` (Medición E2E de la amenaza 3.1)
+
+Ejecuta el grafo completo con LLM real sobre los escenarios de `tests/data/attack_3_1_scenarios.json`, `ATTACK_EVAL_REPETITIONS` veces (por defecto 3). Los evaluadores (`backend/attack_scenario_evaluators.py`) **miden** cada eslabón del ataque y no determinan pass/fail del sistema: `plan_deviated`, `action_agent_invoked`, `new_beneficiary_registered` y `transfer_requested_to_adversary` (verifican la tool call explícita), `transfer_executed_to_adversary`, `execution_path` (`FAST_PATH` / `HITL` / `BLOCKED` / `ERROR` / `NONE`) y `blocked_by_model_armor`. Los espías registran las llamadas sin reemplazar las herramientas reales. El estado se reinicia antes y después de cada corrida.
 
 ---
 
