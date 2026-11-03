@@ -1,0 +1,142 @@
+[
+  {
+    "id": "action_agent_register_recipient_cbu",
+    "description": "Registro de nuevo destinatario en agenda bancaria con CBU y alias a partir del PlanStep",
+    "input": {
+      "session_id": "sess_eval_reg_01",
+      "user_id": "user_default_01",
+      "plan_step": {
+        "step_id": 1,
+        "title": "Registrar destinatario para liquidación impositiva",
+        "target_node": "action_agent",
+        "description": "Registrar a Juan Pérez con CBU 0170099900000012345678 y alias juan.perez en la agenda de destinatarios confiables.",
+        "result": null
+      }
+    },
+    "expected_tool_calls": [
+      {
+        "name": "register_recipient_tool",
+        "args": {
+          "recipient_name": "Juan Pérez",
+          "cbu": "0170099900000012345678",
+          "alias": "juan.perez"
+        }
+      }
+    ],
+    "expected_output_content": [
+      "Juan Pérez",
+      "0170099900000012345678",
+      "registrado exitosamente"
+    ]
+  },
+  {
+    "id": "action_agent_register_corporate_vendor",
+    "description": "Registro de razón social proveedora corporativa en la agenda de cuentas",
+    "input": {
+      "session_id": "sess_eval_reg_02",
+      "user_id": "user_default_01",
+      "plan_step": {
+        "step_id": 1,
+        "title": "Alta de proveedor corporativo",
+        "target_node": "action_agent",
+        "description": "Dar de alta en la agenda de confianza al proveedor Tech Solutions SA con CBU 0720123400000098765432 y alias tech.solutions.sa.",
+        "result": null
+      }
+    },
+    "expected_tool_calls": [
+      {
+        "name": "register_recipient_tool",
+        "args": {
+          "recipient_name": "Tech Solutions SA",
+          "cbu": "0720123400000098765432",
+          "alias": "tech.solutions.sa"
+        }
+      }
+    ],
+    "expected_output_content": [
+      "Tech Solutions SA",
+      "0720123400000098765432",
+      "registrado exitosamente"
+    ]
+  },
+  {
+    "id": "action_agent_transfer_tokenized_destination",
+    "description": "Emisión de transferencia de fondos hacia un token protegido [CBU_BANCARIO_1] proveniente del PlanStep",
+    "input": {
+      "session_id": "sess_eval_tx_01",
+      "user_id": "user_default_01",
+      "plan_step": {
+        "step_id": 2,
+        "title": "Transferir fondos a cuenta destino",
+        "target_node": "action_agent",
+        "description": "Emitir una transferencia de fondos por un monto de 45000.0 ARS hacia el destino [CBU_BANCARIO_1] en concepto de liquidación de factura.",
+        "result": null
+      }
+    },
+    "expected_tool_calls": [
+      {
+        "name": "transfer_funds_tool",
+        "args": {
+          "amount": 45000.0,
+          "destination_account": "[CBU_BANCARIO_1]",
+          "concept": "liquidación de factura"
+        }
+      }
+    ],
+    "expected_output_content": [
+      "45000",
+      "[CBU_BANCARIO_1]",
+      "PENDING_PEP"
+    ]
+  },
+  {
+    "id": "action_agent_transfer_explicit_cbu",
+    "description": "Emisión de transferencia de fondos con monto decimal y CBU explícito",
+    "input": {
+      "session_id": "sess_eval_tx_02",
+      "user_id": "user_default_01",
+      "plan_step": {
+        "step_id": 2,
+        "title": "Transferencia para pago de expensas",
+        "target_node": "action_agent",
+        "description": "Emitir una transferencia de fondos por un monto de 12500.50 hacia la cuenta destino 0170099900000012345678 en concepto de pago de expensas.",
+        "result": null
+      }
+    },
+    "expected_tool_calls": [
+      {
+        "name": "transfer_funds_tool",
+        "args": {
+          "amount": 12500.5,
+          "destination_account": "0170099900000012345678",
+          "concept": "pago de expensas"
+        }
+      }
+    ],
+    "expected_output_content": [
+      "12500.5",
+      "0170099900000012345678",
+      "PENDING_PEP"
+    ]
+  },
+  {
+    "id": "action_agent_unsupported_task_no_tool",
+    "description": "Paso del plan no transaccional fuera del alcance del Action Agent (sin tool calls)",
+    "input": {
+      "session_id": "sess_eval_reject_01",
+      "user_id": "user_default_01",
+      "plan_step": {
+        "step_id": 1,
+        "title": "Consultar historial crediticio y scoring",
+        "target_node": "action_agent",
+        "description": "Consultar el historial crediticio y scoring financiero del usuario en Veraz.",
+        "result": null
+      }
+    },
+    "expected_tool_calls": [],
+    "expected_output_content": [
+      "No hay herramientas / no disponible",
+      "scoring o historial crediticio"
+    ]
+  }
+]
