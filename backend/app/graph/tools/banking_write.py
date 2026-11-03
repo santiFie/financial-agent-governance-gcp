@@ -48,49 +48,20 @@ def register_recipient_tool(
         if token_val:
             resolved_cbu = token_val.strip()
 
-    try:
-        receipt = MCPActionClient.register_account(
-            user_id=user_id,
-            cbu_or_cvu=resolved_cbu,
-            alias=alias,
-            holder_name=effective_name,
-            bank_name=effective_bank,
-        )
-        # Store token association if resolved
-        if effective_cbu != resolved_cbu:
-            with financial_storage._lock:
-                recipients = financial_storage.address_book.get(user_id, [])
-                for rec in recipients:
-                    if rec.get("cbu_or_cvu") == resolved_cbu:
-                        rec["token"] = effective_cbu
-        return receipt
-    except Exception:
-        # Fallback for mock/test environments with custom token formats
+    receipt = MCPActionClient.register_account(
+        user_id=user_id,
+        cbu_or_cvu=resolved_cbu,
+        alias=alias,
+        holder_name=effective_name,
+        bank_name=effective_bank,
+    )
+    # Store token association if resolved
+    if effective_cbu != resolved_cbu:
         with financial_storage._lock:
-            recipients = financial_storage.address_book.setdefault(user_id, [])
-            rec_id = f"rec_{uuid.uuid4().hex[:8]}"
-            now_iso = datetime.now(timezone.utc).isoformat()
-            new_rec = {
-                "recipient_id": rec_id,
-                "user_id": user_id,
-                "cbu_or_cvu": resolved_cbu,
-                "alias": alias.strip().lower() if alias else None,
-                "holder_name": effective_name,
-                "bank_name": effective_bank,
-                "token": effective_cbu if effective_cbu != resolved_cbu else None,
-                "created_at": now_iso,
-            }
-            recipients.append(new_rec)
-            return {
-                "status": "REGISTERED",
-                "recipient_id": rec_id,
-                "user_id": user_id,
-                "cbu_or_cvu": resolved_cbu,
-                "alias": alias,
-                "holder_name": effective_name,
-                "bank_name": effective_bank,
-                "created_at": now_iso,
-            }
+            for rec in financial_storage.address_book.get(user_id, []):
+                if rec.get("cbu_or_cvu") == resolved_cbu:
+                    rec["token"] = effective_cbu
+    return receipt
 
 
 @tool
