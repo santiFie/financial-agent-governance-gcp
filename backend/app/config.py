@@ -29,10 +29,10 @@ class Settings(BaseSettings):
     # - "openrouter": OpenRouter API
     # - "google_genai": Google AI Studio free tier via GEMINI_API_KEY
     llm_provider: Literal["litellm", "groq", "nvidia", "vertexai", "openrouter", "google_genai"] = "litellm"
-    llm_model: Optional[str] = "llama-3.3-70b-versatile"
-    groq_model: str = "llama-3.3-70b-versatile"
-    nvidia_model: str = "meta/llama-3.3-70b-instruct"
-    openrouter_model: str = "meta-llama/llama-3.3-70b-instruct"
+    llm_model: Optional[str] = "openai/gpt-oss-120b"
+    groq_model: str = "openai/gpt-oss-120b"
+    nvidia_model: str = "nvidia/nemotron-3.5-super-vl-120b-a12b"
+    openrouter_model: str = "openai/gpt-oss-120b"
     groq_api_key: Optional[str] = os.getenv("GROQ_API_KEY")
     nvidia_api_key: Optional[str] = os.getenv("NVIDIA_API_KEY")
     gemini_api_key: Optional[str] = os.getenv("GEMINI_API_KEY")
