@@ -20,12 +20,12 @@ class LLMConfigurationError(RuntimeError):
     """Raised when the configured LLM provider cannot be instantiated or credentials are missing."""
 
 
-def _check_groq_deployment(temperature: float) -> Optional[Dict[str, Any]]:
+def _check_groq_deployment(temperature: float, model: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Verifies Groq API key and returns LiteLLM deployment config if valid."""
     api_key = settings.groq_api_key or os.getenv("GROQ_API_KEY")
     if not api_key or not api_key.strip() or api_key.startswith("your-"):
         return None
-    model = getattr(settings, "groq_model", None) or "llama-3.3-70b-versatile"
+    model = model or getattr(settings, "groq_model", None) or "llama-3.3-70b-versatile"
     return {
         "model_name": "groq",
         "litellm_params": {
@@ -36,12 +36,12 @@ def _check_groq_deployment(temperature: float) -> Optional[Dict[str, Any]]:
     }
 
 
-def _check_nvidia_deployment(temperature: float) -> Optional[Dict[str, Any]]:
+def _check_nvidia_deployment(temperature: float, model: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Verifies NVIDIA API key and returns LiteLLM deployment config if valid."""
     api_key = settings.nvidia_api_key or os.getenv("NVIDIA_API_KEY")
     if not api_key or not api_key.strip() or api_key.startswith("your-"):
         return None
-    model = getattr(settings, "nvidia_model", None) or "meta/llama-3.3-70b-instruct"
+    model = model or getattr(settings, "nvidia_model", None) or "meta/llama-3.3-70b-instruct"
     return {
         "model_name": "nvidia",
         "litellm_params": {
@@ -52,7 +52,7 @@ def _check_nvidia_deployment(temperature: float) -> Optional[Dict[str, Any]]:
     }
 
 
-def _check_vertexai_deployment(temperature: float) -> Optional[Dict[str, Any]]:
+def _check_vertexai_deployment(temperature: float, model: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Verifies GCP project, location and credentials for Vertex AI."""
     project = (
         settings.gcp_project_id
@@ -96,7 +96,7 @@ def _check_vertexai_deployment(temperature: float) -> Optional[Dict[str, Any]]:
     if not project or not has_creds:
         return None
 
-    model = getattr(settings, "vertex_model_name", None) or "gemini-1.5-flash-002"
+    model = model or getattr(settings, "vertex_model_name", None) or "gemini-1.5-flash-002"
     litellm_params: Dict[str, Any] = {
         "model": f"vertex_ai/{model}",
         "vertex_project": project,
@@ -112,12 +112,12 @@ def _check_vertexai_deployment(temperature: float) -> Optional[Dict[str, Any]]:
     }
 
 
-def _check_openrouter_deployment(temperature: float) -> Optional[Dict[str, Any]]:
+def _check_openrouter_deployment(temperature: float, model: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Verifies OpenRouter API key and returns LiteLLM deployment config if valid."""
     api_key = getattr(settings, "openrouter_api_key", None) or os.getenv("OPENROUTER_API_KEY")
     if not api_key or not api_key.strip() or api_key.startswith("your-"):
         return None
-    model = getattr(settings, "openrouter_model", None) or "meta-llama/llama-3.3-70b-instruct"
+    model = model or getattr(settings, "openrouter_model", None) or "meta-llama/llama-3.3-70b-instruct"
     return {
         "model_name": "openrouter",
         "litellm_params": {
@@ -128,10 +128,17 @@ def _check_openrouter_deployment(temperature: float) -> Optional[Dict[str, Any]]
     }
 
 
-def get_available_deployments(temperature: float = 0.0) -> List[Dict[str, Any]]:
+def get_available_deployments(
+    temperature: float = 0.0,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """
     Evaluates providers in priority order: groq -> nvidia -> vertexai -> openrouter.
     Returns list of deployment configurations for providers that have valid credentials.
+
+    If `provider` is given, that provider is placed first in the list. `model` overrides
+    the provider's default model (it only applies when `provider` is given).
     """
     providers_order = [
         ("groq", _check_groq_deployment),
@@ -140,27 +147,45 @@ def get_available_deployments(temperature: float = 0.0) -> List[Dict[str, Any]]:
         ("openrouter", _check_openrouter_deployment),
     ]
 
+    provider = provider.lower() if provider else None
+    if provider and provider not in {n for n, _ in providers_order}:
+        raise LLMConfigurationError(f"Provider LLM desconocido: '{provider}'.")
+
     deployments: List[Dict[str, Any]] = []
     for name, check_fn in providers_order:
-        dep = check_fn(temperature)
-        if dep is not None:
-            deployments.append(dep)
+        if name == provider:
+            dep = check_fn(temperature, model)
+            if dep is None:
+                raise LLMConfigurationError(
+                    f"El provider '{provider}' fue solicitado pero no tiene credenciales válidas."
+                )
+            deployments.insert(0, dep)
+        else:
+            dep = check_fn(temperature)
+            if dep is not None:
+                deployments.append(dep)
 
     return deployments
 
 
-def get_chat_model(temperature: float = 0.0) -> BaseChatModel:
+def get_chat_model(
+    temperature: float = 0.0,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+) -> BaseChatModel:
     """
     Instantiates and returns a LangChain chat model with LiteLLM Router fallbacks.
     Order of fallbacks: groq -> nvidia -> vertexai -> openrouter.
     Only providers with verified credentials/parameters are included in the fallback chain.
+    If `provider` is given it is placed first in the chain; `model` overrides that provider's
+    default model (if `model` is None the provider's default model is used).
     Raises LLMConfigurationError if no provider is configured with valid credentials.
     """
     configured_provider = (settings.llm_provider or "").lower()
     if configured_provider and configured_provider not in KNOWN_PROVIDERS:
         raise LLMConfigurationError(f"Provider LLM desconocido: '{settings.llm_provider}'.")
 
-    model_list = get_available_deployments(temperature=temperature)
+    model_list = get_available_deployments(temperature=temperature, provider=provider, model=model)
 
     if not model_list:
         raise LLMConfigurationError(
