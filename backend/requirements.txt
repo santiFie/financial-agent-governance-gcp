@@ -21,6 +21,10 @@ langchain-groq>=1.1.0
 langchain-openai>=1.6.0
 google-auth>=2.29.0
 
+# MCP action server (imported in-process)
+fastmcp>=4.1.0
+starlette>=0.37.0
+
 # Security & Utilities
 cryptography>=42.0.0
 pyyaml>=6.0.1

@@ -1,0 +1,8 @@
+# Build the backend image with the repo root as context (it bundles mcp_financial_action_server).
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "backend/Dockerfile", "-t", "${_IMAGE}", "."]
+images:
+  - "${_IMAGE}"
+substitutions:
+  _IMAGE: ""

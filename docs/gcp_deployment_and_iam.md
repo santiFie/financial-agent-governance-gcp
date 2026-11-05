@@ -92,8 +92,9 @@ gcloud artifacts repositories create fintech-repo \
   --description="Repositorio Docker para Asistente Financiero"
 
 # Construir y subir imagen del Backend
-gcloud builds submit backend \
-  --tag us-central1-docker.pkg.dev/$PROJECT_ID/fintech-repo/backend:v1
+gcloud builds submit . \
+  --config deploy/cloudbuild-backend.yaml \
+  --substitutions _IMAGE=us-central1-docker.pkg.dev/$PROJECT_ID/fintech-repo/backend:v1
 ```
 
 ### Paso 5: Desplegar en Cloud Run con Menor Privilegio
