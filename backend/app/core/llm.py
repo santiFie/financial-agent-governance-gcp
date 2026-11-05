@@ -124,6 +124,7 @@ def _check_openrouter_deployment(temperature: float, model: Optional[str] = None
             "model": f"openrouter/{model}",
             "api_key": api_key.strip(),
             "temperature": temperature,
+            # "reasoning_effort": "high"  # OPCIONAL: pruebas con/sin reasoning
         },
     }
 

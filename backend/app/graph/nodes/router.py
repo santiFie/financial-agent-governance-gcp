@@ -179,7 +179,11 @@ def _orchestrate(state: AgentState) -> Dict[str, Any]:
         agents_catalog=render_agents_catalog(),
         max_steps=settings.orchestrator_max_plan_steps,
     )
-    base_llm = get_chat_model(temperature=0.0)
+    base_llm = get_chat_model(
+        temperature=0.0,
+        provider="openrouter",
+        model="deepseek/deepseek-v4-flash",
+    )
     if base_llm is None:
         raise OrchestratorError("No hay credenciales LLM configuradas para el Orquestador.")
     llm = base_llm.bind_tools([read_document_tool, PlanUpdate], tool_choice="any")

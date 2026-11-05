@@ -23,14 +23,14 @@ AGENT_REGISTRY: Dict[TargetNode, AgentSpec] = {
     TargetNode.READ_ONLY_AGENT: AgentSpec(
         graph_node="readonly_agent",
         description=(
-            "Agente de solo lectura. Consulta saldos de cuentas y últimos movimientos bancarios del usuario. "
+            "Agente de solo lectura. Solamente consulta saldos de cuentas y últimos movimientos bancarios del usuario. "
             "No puede modificar datos ni mover fondos."
         ),
     ),
     TargetNode.ACTION_AGENT: AgentSpec(
         graph_node="action_agent",
         description=(
-            "Agente transaccional. Registra destinatarios en la agenda de cuentas y emite transferencias de fondos "
+            "Agente transaccional. Registra destinatarios (contrapartes confiables) en la agenda de cuentas y emite transferencias de fondos "
             "(las transferencias pasan por la capa de gobernanza antes de ejecutarse). Ejecuta una única acción por paso."
         ),
     ),

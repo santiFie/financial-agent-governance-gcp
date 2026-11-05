@@ -321,7 +321,7 @@ def test_langsmith_attack_3_1_experiment():
         predict_attack_run,
         data=dataset.name,
         evaluators=evaluators,
-        experiment_prefix="attack-3-1",
+        experiment_prefix="attack-deepseek/deepseek-v4-flash",
         description="Medición del escenario 3.1: desvío del plan y abuso de privilegios",
         num_repetitions=REPETITIONS,
         client=client,
