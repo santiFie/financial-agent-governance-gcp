@@ -2,6 +2,7 @@
 FastAPI Main Application.
 Exposes endpoints for chat, Human-in-the-Loop approvals, telemetry, and pending transfers.
 """
+import logging
 import time
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, status
@@ -23,6 +24,8 @@ from app.graph.graph import financial_graph
 from app.db.mock_banking import mock_banking_db
 from app.core.mcp_action_client import mcp_action_client
 from app.core.telemetry import build_trace_config, get_telemetry_status
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title=settings.app_name,
@@ -80,12 +83,14 @@ async def chat_endpoint(request: ChatRequest):
     }
 
     try:
-        # Run graph until completion or breakpoint interrupt
-        result = financial_graph.invoke(initial_state, config=config)
+        # Runs until completion or until interrupt(); a HITL pause is read back from the checkpointed state below
+        financial_graph.invoke(initial_state, config=config)
     except Exception as e:
-        # LangGraph raises when an interrupt is triggered depending on invocation style,
-        # or we inspect current graph state
-        pass
+        logger.exception("Error ejecutando el grafo para la sesión %s", session_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error ejecutando el grafo: {str(e)}"
+        )
 
     # Inspect current state from checkpointer
     graph_state = financial_graph.get_state(config)
@@ -189,6 +194,17 @@ async def approve_endpoint(request: ApproveRequest):
             detail=f"La sesión {request.session_id} no tiene una ejecución en pausa esperando aprobación."
         )
 
+    staged = mock_banking_db.pending_transfers.get(request.transaction_id)
+    if (
+        staged is None
+        or staged.get("session_id") != request.session_id
+        or staged.get("status") != "PENDING_APPROVAL"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"La transacción {request.transaction_id} no está pendiente de aprobación en la sesión {request.session_id}."
+        )
+
     # Resume graph execution using Command(resume=...)
     try:
         resumed_result = financial_graph.invoke(
@@ -206,7 +222,7 @@ async def approve_endpoint(request: ApproveRequest):
         )
 
     # Check updated balance if executed
-    accounts = mcp_action_client.read_account_balances("user_default_01")
+    accounts = mcp_action_client.read_account_balances(staged["user_id"])
     primary_balance = accounts[0]["balance"] if accounts else None
 
     return ApproveResponse(
