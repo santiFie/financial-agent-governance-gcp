@@ -69,16 +69,18 @@ def test_seed_document_passes_model_armor():
 
 
 def test_document_dlp_cbu_tokenization():
+    import re
     from app.core.document_loader import document_ingestion_service
 
     session_id = "test_sess_doc_dlp"
     content = document_ingestion_service.load_document("cualquier_nombre.txt")
+    first_cbu = re.search(r"\d{22}", content).group(0)
     sanitized, detected = dlp_sanitizer.sanitize(content, session_id=session_id)
 
-    assert "0170099900000012345678" not in sanitized
+    assert first_cbu not in sanitized
     assert "[CBU_BANCARIO_1]" in sanitized
     assert any(d.token_assigned == "[CBU_BANCARIO_1]" for d in detected)
-    assert token_vault.resolve_token(session_id, "[CBU_BANCARIO_1]") == "0170099900000012345678"
+    assert token_vault.resolve_token(session_id, "[CBU_BANCARIO_1]") == first_cbu
 
 
 def test_sanitizer_node_sanitizes_input_and_resets_turn_state():
