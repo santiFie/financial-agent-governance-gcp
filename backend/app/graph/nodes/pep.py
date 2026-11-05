@@ -3,6 +3,7 @@ Policy Enforcement Point (PEP) Node.
 Security boundary enforcing authorization policies before funds are debited.
 Evaluates Policy Decision Point (PDP) responses to determine Fast-Path vs HITL interrupt.
 """
+import logging
 from typing import Dict, Any, List, Optional
 import httpx
 import uuid
@@ -15,6 +16,8 @@ from app.config import settings
 from app.db.mock_banking import mock_banking_db
 from app.core.security_context import token_vault, normalize_account_reference
 from app.core.mcp_action_client import mcp_action_client
+
+logger = logging.getLogger(__name__)
 
 
 class AwaitableDict(dict):
@@ -56,6 +59,44 @@ def _execution_failed(state: AgentState, error: Exception, approval_status: str)
         "execution_plan": _mark_current_step_completed(state, msg),
         "messages": [AIMessage(content=msg)],
     })
+
+
+def _query_pdp(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Asks the PDP (OPA data API) for a decision. OPA expects {"input": ...} and answers {"result": ...}.
+    Returns None when the PDP is unreachable, answers with a non-200 status or returns no usable decision.
+    """
+    try:
+        with httpx.Client(timeout=settings.pdp_timeout_seconds) as client:
+            resp = client.post(settings.pdp_url, json={"input": payload})
+        if resp.status_code != 200:
+            logger.warning("PDP respondió con status %s en %s; se aplica fallback.", resp.status_code, settings.pdp_url)
+            return None
+        decision = resp.json().get("result")
+        if not isinstance(decision, dict) or "allow" not in decision:
+            logger.warning("PDP devolvió una respuesta sin decisión válida; se aplica fallback.")
+            return None
+        return decision
+    except Exception as e:
+        logger.warning("No se pudo consultar el PDP en %s: %s; se aplica fallback.", settings.pdp_url, e)
+        return None
+
+
+def _pdp_fallback_decision() -> Dict[str, Any]:
+    """Decision used when the PDP cannot answer, driven by settings.pdp_fallback_mode ('deny' or 'hitl')."""
+    if settings.pdp_fallback_mode == "hitl":
+        return {
+            "allow": True,
+            "require_hitl": True,
+            "fallback": True,
+            "reason": "HITL requerido (PDP no disponible)",
+        }
+    return {
+        "allow": False,
+        "require_hitl": False,
+        "fallback": True,
+        "reason": "PDP no disponible, solicitud denegada por política de fallback.",
+    }
 
 
 def pep_node(state: AgentState) -> AwaitableDict:
@@ -141,42 +182,22 @@ def pep_node(state: AgentState) -> AwaitableDict:
         is_trusted = bool(mcp_action_client.is_trusted_recipient(user_id, destination, session_id=session_id))
 
     # Query Policy Decision Point (PDP) via HTTP POST
-    pdp_decision: Optional[Dict[str, Any]] = None
     pdp_payload = {
         "user_id": user_id,
-        "source_account_id": source_account,
-        "destination": target_for_check,
         "amount": amount,
-        "currency": "ARS",
         "is_trusted_recipient": is_trusted
     }
 
-    try:
-        with httpx.Client(timeout=settings.pdp_timeout_seconds) as client:
-            resp = client.post(settings.pdp_url, json=pdp_payload)
-            if resp.status_code == 200:
-                pdp_decision = resp.json()
-    except Exception:
-        pdp_decision = None
-
-    # Offline resiliency & fallback policy
+    pdp_decision = _query_pdp(pdp_payload)
     if pdp_decision is None:
-        if is_trusted and amount < 50000.0:
-            pdp_decision = {
-                "allow": True,
-                "require_hitl": False,
-                "reason": "Fast-Path (resilient fallback: destinatario registrado y monto < $50.000 ARS)"
-            }
-        else:
-            pdp_decision = {
-                "allow": True,
-                "require_hitl": True,
-                "reason": "HITL requerido (resilient fallback: destinatario no registrado o monto >= $50.000 ARS)"
-            }
+        pdp_decision = _pdp_fallback_decision()
 
     # Evaluate PDP Decision
     if not pdp_decision.get("allow", False):
         reason = pdp_decision.get("reason", "Operación bloqueada por política de seguridad")
+        if pdp_decision.get("fallback"):
+            # PDP unavailable: fail closed without flagging the request as a security threat
+            return _execution_failed(state, RuntimeError(reason), approval_status="NONE")
         block_msg = f"❌ **Operación Bloqueada por Gobernanza PEP**\n\n• Motivo: {reason}"
         return AwaitableDict({
             "final_response": block_msg,

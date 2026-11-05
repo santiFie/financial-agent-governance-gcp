@@ -6,11 +6,20 @@ import pytest
 from unittest.mock import MagicMock, patch
 import httpx
 
+from app.config import settings
 from app.graph.nodes.pep import pep_node
 from app.db.mock_banking import mock_banking_db
 from app.core.mcp_action_client import mcp_action_client
 from app.core.security_context import token_vault
 from mcp_financial_action_server.storage import financial_storage
+
+
+def _pdp_response(decision, status_code=200):
+    """Builds a mocked OPA data-API response: {"result": <decision>}."""
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.json.return_value = {"result": decision}
+    return resp
 
 
 @pytest.fixture(autouse=True)
@@ -73,13 +82,11 @@ def test_pep_fast_path_when_trusted_and_under_threshold():
         }
     }
 
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {
+    mock_resp = _pdp_response({
         "allow": True,
         "require_hitl": False,
         "reason": "Fast-Path aprobado: destinatario registrado y monto inferior a $50.000 ARS"
-    }
+    })
 
     initial_balance = financial_storage.get_account("acc_001").balance
 
@@ -136,13 +143,11 @@ def test_pep_hitl_when_amount_exceeds_threshold():
         ]
     }
 
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {
+    mock_resp = _pdp_response({
         "allow": True,
         "require_hitl": True,
         "reason": "Monto supera el umbral de Fast-Path ($50.000 ARS)"
-    }
+    })
 
     initial_balance = financial_storage.get_account("acc_001").balance
 
@@ -190,13 +195,11 @@ def test_pep_hitl_when_untrusted_recipient():
         ]
     }
 
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {
+    mock_resp = _pdp_response({
         "allow": True,
         "require_hitl": True,
         "reason": "Destinatario no registrado en agenda de confianza"
-    }
+    })
 
     with patch("httpx.Client.post", return_value=mock_resp), \
          patch("app.graph.nodes.pep.interrupt", return_value={"decision": "APPROVED", "admin_user": "oficial"}) as mock_interrupt:
@@ -232,7 +235,9 @@ def test_pep_hitl_rejected_by_human():
 
     initial_balance = financial_storage.get_account("acc_001").balance
 
-    with patch("httpx.Client.post", side_effect=httpx.ConnectError("PDP offline")), \
+    hitl_resp = _pdp_response({"allow": True, "require_hitl": True, "reason": "HITL requerido"})
+
+    with patch("httpx.Client.post", return_value=hitl_resp), \
          patch("app.graph.nodes.pep.interrupt", return_value={"decision": "REJECTED", "admin_user": "auditor", "reason": "Patrón anómalo"}) as mock_interrupt:
 
         result = pep_node(state)
@@ -243,51 +248,81 @@ def test_pep_hitl_rejected_by_human():
         assert financial_storage.get_account("acc_001").balance == initial_balance
 
 
-def test_pep_resilient_fallback_when_pdp_offline():
-    """
-    Validates offline resiliency:
-    When PDP server cannot be reached, fallback policy evaluates:
-    - Trusted recipient & amount < 50k -> Fast-Path granted
-    - Untrusted or amount >= 50k -> HITL required
-    """
-    user_id = "user_default_01"
-    session_id = "sess_fallback_fast"
-    cbu = "0170099900000012345678"
-    amount = 20000.0
-
-    mcp_action_client.register_account(
-        user_id=user_id,
-        cbu_or_cvu=cbu,
-        holder_name="Fideicomiso Recaudador Fiscal",
-        bank_name="Banco Nación"
-    )
-
-    state = {
+def _fallback_state(session_id, cbu, amount):
+    return {
         "session_id": session_id,
-        "user_id": user_id,
-        "pending_tool_calls": [
-            {
-                "name": "transfer_funds_tool",
-                "args": {
-                    "user_id": user_id,
-                    "source_account": "acc_001",
-                    "destination_account": cbu,
-                    "amount": amount,
-                }
-            }
-        ]
+        "user_id": "user_default_01",
+        "pending_tool_calls": [{"name": "transfer_funds_tool", "args": {
+            "source_account": "acc_001", "destination_account": cbu, "amount": amount}}],
     }
 
-    # Simulate network failure / connection timeout to PDP
-    with patch("httpx.Client.post", side_effect=httpx.ConnectTimeout("PDP connection timed out")), \
-         patch("app.graph.nodes.pep.interrupt") as mock_interrupt:
 
-        result = pep_node(state)
+@pytest.mark.parametrize("pdp_failure", [
+    {"side_effect": httpx.ConnectTimeout("PDP connection timed out")},
+    {"side_effect": httpx.ConnectError("PDP offline")},
+    {"return_value": _pdp_response({"allow": True}, status_code=500)},
+    {"return_value": _pdp_response({"allow": True}, status_code=404)},
+    {"return_value": MagicMock(status_code=200, json=MagicMock(return_value={}))},
+    {"return_value": MagicMock(status_code=200, json=MagicMock(return_value={"result": {"reason": "sin allow"}}))},
+])
+def test_pep_fails_closed_when_pdp_unavailable(pdp_failure, caplog):
+    """
+    PDP unreachable, non-200 or without a usable decision -> fallback mode 'deny':
+    the step ends FAILED (not BLOCKED, not flagged as threat), no debit and no interrupt, with a warning logged.
+    """
+    cbu = "0170099900000012345678"
+    mcp_action_client.register_account(
+        user_id="user_default_01", cbu_or_cvu=cbu, holder_name="Fideicomiso", bank_name="Banco Nación"
+    )
+    initial_balance = financial_storage.get_account("acc_001").balance
 
-        # Fast-Path granted by offline fallback policy
-        mock_interrupt.assert_not_called()
-        assert result["status"] == "COMPLETED"
-        assert result["approval_status"] == "APPROVED"
+    with patch("httpx.Client.post", **pdp_failure), \
+         patch("app.graph.nodes.pep.interrupt") as mock_interrupt, \
+         patch.object(settings, "pdp_fallback_mode", "deny"), \
+         caplog.at_level("WARNING", logger="app.graph.nodes.pep"):
+        result = pep_node(_fallback_state("sess_fallback_deny", cbu, 20000.0))
+
+    mock_interrupt.assert_not_called()
+    assert result["status"] == "FAILED"
+    assert not result.get("is_threat")
+    assert result["pending_tool_calls"] == []
+    assert "PDP no disponible" in result["final_response"]
+    assert financial_storage.get_account("acc_001").balance == initial_balance
+    assert any(r.levelname == "WARNING" for r in caplog.records)
+
+
+def test_pep_fallback_mode_hitl_degrades_to_human_approval():
+    """With pdp_fallback_mode='hitl' an unavailable PDP routes the transfer to HITL instead of failing."""
+    cbu = "0170099900000012345678"
+    mcp_action_client.register_account(
+        user_id="user_default_01", cbu_or_cvu=cbu, holder_name="Fideicomiso", bank_name="Banco Nación"
+    )
+    initial_balance = financial_storage.get_account("acc_001").balance
+
+    with patch("httpx.Client.post", side_effect=httpx.ConnectError("PDP offline")), \
+         patch.object(settings, "pdp_fallback_mode", "hitl"), \
+         patch("app.graph.nodes.pep.interrupt", return_value={"decision": "REJECTED", "admin_user": "auditor"}) as mock_interrupt:
+        result = pep_node(_fallback_state("sess_fallback_hitl", cbu, 20000.0))
+
+    mock_interrupt.assert_called_once()
+    assert result["approval_status"] == "REJECTED"
+    assert financial_storage.get_account("acc_001").balance == initial_balance
+
+
+def test_pep_sends_opa_input_envelope_to_configured_url():
+    """PEP posts {"input": {...}} to settings.pdp_url, as the OPA data API expects."""
+    cbu = "0170099900000012345678"
+    mcp_action_client.register_account(
+        user_id="user_default_01", cbu_or_cvu=cbu, holder_name="Fideicomiso", bank_name="Banco Nación"
+    )
+    ok = _pdp_response({"allow": True, "require_hitl": False, "reason": "Fast-Path"})
+
+    with patch("httpx.Client.post", return_value=ok) as mock_post, patch("app.graph.nodes.pep.interrupt"):
+        pep_node(_fallback_state("sess_envelope", cbu, 1000.0))
+
+    args, kwargs = mock_post.call_args
+    assert args[0] == settings.pdp_url
+    assert kwargs["json"] == {"input": {"user_id": "user_default_01", "amount": 1000.0, "is_trusted_recipient": True}}
 
 
 def test_pep_blocks_when_pdp_denies():
@@ -312,13 +347,11 @@ def test_pep_blocks_when_pdp_denies():
         ]
     }
 
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {
+    mock_resp = _pdp_response({
         "allow": False,
         "require_hitl": False,
         "reason": "Destinatario bloqueado en lista negra por prevención de lavado"
-    }
+    })
 
     with patch("httpx.Client.post", return_value=mock_resp), \
          patch("app.graph.nodes.pep.interrupt") as mock_interrupt:
@@ -367,10 +400,7 @@ def test_pep_resolves_surrogate_token_for_trusted_check():
     def fake_post(url, json=None, **kwargs):
         nonlocal captured_payload
         captured_payload = json
-        mock_r = MagicMock()
-        mock_r.status_code = 200
-        mock_r.json.return_value = {"allow": True, "require_hitl": False, "reason": "Fast-Path approved"}
-        return mock_r
+        return _pdp_response({"allow": True, "require_hitl": False, "reason": "Fast-Path approved"})
 
     with patch("httpx.Client.post", side_effect=fake_post), \
          patch("app.graph.nodes.pep.interrupt") as mock_interrupt:
@@ -380,8 +410,8 @@ def test_pep_resolves_surrogate_token_for_trusted_check():
         assert result["status"] == "COMPLETED"
         # Verify real CBU was evaluated and is_trusted was True
         assert captured_payload is not None
-        assert captured_payload["destination"] == real_cbu
-        assert captured_payload["is_trusted_recipient"] is True
+        assert captured_payload["input"]["is_trusted_recipient"] is True
+        assert captured_payload["input"]["amount"] == amount
 
 
 def test_pep_reports_failure_when_mcp_rejects_the_transfer():
@@ -393,8 +423,7 @@ def test_pep_reports_failure_when_mcp_rejects_the_transfer():
             "source_account": "acc_001", "destination_account": "[CBU_NO_RESUELTO_1]", "amount": 1000.0}}],
     }
     initial_balance = financial_storage.get_account("acc_001").balance
-    mock_resp = MagicMock(status_code=200)
-    mock_resp.json.return_value = {"allow": True, "require_hitl": False, "reason": "fast"}
+    mock_resp = _pdp_response({"allow": True, "require_hitl": False, "reason": "fast"})
 
     with patch("httpx.Client.post", return_value=mock_resp), patch("app.graph.nodes.pep.interrupt"):
         result = pep_node(state)

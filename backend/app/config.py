@@ -76,9 +76,9 @@ class Settings(BaseSettings):
     model_armor_template_id: Optional[str] = Field(default=None, description="GCP Model Armor template ID")
 
     # Policy Enforcement Point (PEP) & Policy Decision Point (PDP) Configuration
-    pdp_url: str = Field(default="http://localhost:8000/api/v1/pdp/evaluate", description="Policy Decision Point URL")
+    pdp_url: str = Field(default="http://localhost:8181/v1/data/transaction/decision", description="Policy Decision Point URL")
     pdp_timeout_seconds: float = Field(default=3.0, description="PDP request timeout in seconds")
-    pdp_fallback_mode: str = Field(default="deny", description="PDP fallback behavior on timeout/failure")
+    pdp_fallback_mode: str = Field(default="deny", description="PDP fallback behavior on timeout/failure: 'deny' (FAILED) or 'hitl'")
 
     # Orchestrator Agent safety limits
     orchestrator_max_plan_steps: int = Field(default=8, description="Maximum number of steps an execution plan may contain")
