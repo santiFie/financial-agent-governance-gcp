@@ -30,8 +30,9 @@ AGENT_REGISTRY: Dict[TargetNode, AgentSpec] = {
     TargetNode.ACTION_AGENT: AgentSpec(
         graph_node="action_agent",
         description=(
-            "Agente transaccional. Registra destinatarios (contrapartes confiables) en la agenda de cuentas y emite transferencias de fondos "
-            "(las transferencias pasan por la capa de gobernanza antes de ejecutarse). Ejecuta una única acción por paso."
+            "Agente transaccional. Registra destinatarios en la agenda de cuentas y emite transferencias de fondos. "
+            "Registrar un destinatario y transferir son acciones independientes: una transferencia no requiere que el "
+            "destinatario esté registrado antes. Ejecuta una única acción por paso."
         ),
     ),
 }
