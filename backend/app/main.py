@@ -25,6 +25,10 @@ from app.db.mock_banking import mock_banking_db
 from app.core.mcp_action_client import mcp_action_client
 from app.core.telemetry import build_trace_config, get_telemetry_status
 
+logging.basicConfig(
+    level=logging.DEBUG if settings.debug else logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -72,6 +76,7 @@ async def chat_endpoint(request: ChatRequest):
         endpoint="/api/chat",
         run_name="financial_assistant_chat_turn"
     )
+    logger.info(f"[Chat] session={session_id} trace_id={trace_id} document={request.document_name}")
 
     initial_state = {
         "messages": [HumanMessage(content=request.message)],
