@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     # - "google_genai": Google AI Studio free tier via GEMINI_API_KEY
     llm_provider: Literal["litellm", "groq", "nvidia", "vertexai", "openrouter", "google_genai"] = "litellm"
     llm_model: Optional[str] = "openai/gpt-oss-120b"
+    # Orchestrator model override. When unset, the orchestrator uses the same provider/model as the executor agents.
+    # Attack success depends on the model: see docs/modelos_probados.md.
+    orchestrator_provider: Optional[Literal["litellm", "groq", "nvidia", "vertexai", "openrouter", "google_genai"]] = None
+    orchestrator_model: Optional[str] = None
     groq_model: str = "openai/gpt-oss-120b"
     nvidia_model: str = "nvidia/nemotron-3.5-super-vl-120b-a12b"
     openrouter_model: str = "openai/gpt-oss-120b"
