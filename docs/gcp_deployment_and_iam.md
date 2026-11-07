@@ -1,6 +1,6 @@
 # Despliegue en Google Cloud Platform (GCP) y Guía de Aprendizaje IAM
 
-Esta guía explica cómo desplegar **AegisBank AI** en GCP maximizando la preservación del crédito inicial de $300 USD y detalla el ejercicio práctico de configuración de **IAM bajo el Principio de Menor Privilegio (Least Privilege)**. Para consultar las decisiones sobre Firestore, Artifact Registry, cuentas de servicio de CI/CD (`sa-cloud-build`) y resolución de incidencias en Cloud Build, consulta [`docs/gcp_build_and_service_accounts_decisions.md`](file:///home/santi/Documentos/Curso%20Ciberseguridad/gcp-projects/financial_asistent/docs/gcp_build_and_service_accounts_decisions.md).
+Esta guía explica cómo desplegar **AegisBank AI** en GCP maximizando la preservación del crédito inicial de $300 USD y detalla el ejercicio práctico de configuración de **IAM bajo el Principio de Menor Privilegio (Least Privilege)**. Para consultar las decisiones sobre Firestore, Artifact Registry, cuentas de servicio de CI/CD (`sa-cloud-build`) y resolución de incidencias en Cloud Build, consulta [`docs/gcp_build_and_service_accounts_decisions.md`](gcp_build_and_service_accounts_decisions.md).
 
 ---
 
@@ -21,7 +21,7 @@ Para operar este proyecto sin consumir de forma prematura tus $300 de crédito, 
 ## 2. Ejercicio Práctico: Configuración de IAM (Least Privilege)
 
 > [!NOTE]
-> Este módulo está reservado para ser completado por ti en el archivo [`deploy/iam-setup.sh`](file:///home/santi/Documentos/Curso%20Ciberseguridad/gcp-projects/financial_asistent/deploy/iam-setup.sh), permitiéndote afianzar las competencias de gobernanza y seguridad en agentes de IA.
+> Este módulo está reservado para ser completado por ti en el archivo [`deploy/iam-setup.sh`](../deploy/iam-setup.sh), permitiéndote afianzar las competencias de gobernanza y seguridad en agentes de IA.
 
 ### ¿Por qué NO usar la Service Account por defecto de Compute Engine?
 Por defecto, Cloud Run puede ejecutarse con la Service Account `[PROJECT_NUMBER]-compute@developer.gserviceaccount.com`, la cual posee el rol **Editor** a nivel de proyecto. Si un atacante comprometiera el contenedor o lograra ejecución remota, tendría control total sobre el proyecto GCP.
@@ -69,13 +69,23 @@ gcloud services enable \
   artifactregistry.googleapis.com \
   dlp.googleapis.com \
   aiplatform.googleapis.com \
-  firestore.googleapis.com
+  firestore.googleapis.com \
+  modelarmor.googleapis.com \
+  secretmanager.googleapis.com \
+  storage.googleapis.com
 ```
 
 ### Paso 2: Crear base de datos Firestore en Modo Nativo
 ```bash
 gcloud firestore databases create --location=us-central1 --type=firestore-native
 ```
+
+### Paso 2.b: Crear el secreto del Token Vault
+Con `ENVIRONMENT=production` el backend **no arranca** si `TOKEN_VAULT_SECRET` conserva el valor por defecto.
+```bash
+openssl rand -base64 32 | gcloud secrets create token-vault-secret --data-file=-
+```
+`deploy/iam-setup.sh` (paso 4c) concede a la Service Account `roles/secretmanager.secretAccessor` sobre ese secreto, por eso el secreto se crea antes.
 
 ### Paso 3: Ejecutar tu script de configuración IAM
 ```bash
@@ -92,8 +102,9 @@ gcloud artifacts repositories create fintech-repo \
   --description="Repositorio Docker para Asistente Financiero"
 
 # Construir y subir imagen del Backend
-gcloud builds submit backend \
-  --tag us-central1-docker.pkg.dev/$PROJECT_ID/fintech-repo/backend:v1
+gcloud builds submit . \
+  --config deploy/cloudbuild-backend.yaml \
+  --substitutions _IMAGE=us-central1-docker.pkg.dev/$PROJECT_ID/fintech-repo/backend:v1
 ```
 
 ### Paso 5: Desplegar en Cloud Run con Menor Privilegio
@@ -104,12 +115,54 @@ gcloud run deploy financial-assistant-backend \
   --region us-central1 \
   --service-account sa-financial-assistant@${PROJECT_ID}.iam.gserviceaccount.com \
   --min-instances 0 \
-  --max-instances 2 \
+  --max-instances 1 \
   --memory 512Mi \
   --cpu 1 \
-  --allow-unauthenticated \
-  --set-env-vars ENVIRONMENT=production,SECURITY_MODE=gcp_live,GCP_PROJECT_ID=$PROJECT_ID,CHECKPOINTER_TYPE=firestore
+  --no-allow-unauthenticated \
+  --set-secrets TOKEN_VAULT_SECRET=token-vault-secret:latest \
+  --set-env-vars ENVIRONMENT=production,SECURITY_MODE=gcp_live,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=us-central1,LLM_PROVIDER=vertexai,VERTEX_MODEL_NAME=$VERTEX_MODEL,USE_GCP_MODEL_ARMOR=true,MODEL_ARMOR_TEMPLATE_ID=aegisbank-template,PDP_URL=$PDP_URL,PDP_FALLBACK_MODE=deny
 ```
+
+Puntos que el comando anterior corrige respecto de la versión previa de esta guía (sin ellos el servicio no arranca o no puede ejecutar transferencias):
+
+- **`TOKEN_VAULT_SECRET`** es obligatorio en producción (ver Paso 2.b).
+- **`LLM_PROVIDER=vertexai`**: con el valor por defecto (`litellm`) se intenta primero Groq y NVIDIA, que no tienen credenciales en Cloud Run.
+- **`VERTEX_MODEL_NAME`**: el valor por defecto del repo (`gemini-1.5-flash-002`) corresponde a una generación de modelos que Google fue retirando; elegí un modelo vigente en Vertex AI Model Garden (`export VERTEX_MODEL=...`) y verificá que esté disponible en tu región.
+- **`PDP_URL`**: tiene que apuntar a una instancia de OPA con `policies/` cargada (ver la nota al final). Sin PDP, con `PDP_FALLBACK_MODE=deny` toda alta de destinatario y toda transferencia termina `FAILED`.
+- **`--max-instances 1`**: la agenda de destinatarios, el Token Vault y el checkpointer viven en memoria del proceso. Con más de una instancia, un `POST /api/approve` o una transferencia posterior pueden caer en otra instancia que no conoce el estado.
+- **`--no-allow-unauthenticated`**: la PoC es deliberadamente vulnerable y el CORS del backend es `*`. No la expongas públicamente; invocala con un token de identidad (`gcloud auth print-identity-token`) o por `gcloud run services proxy`.
+
+El manifiesto `deploy/cloudrun-service.yaml` es el equivalente declarativo: reemplazá `${PROJECT_ID}`, `${MODEL_ARMOR_TEMPLATE_ID}` y `${PDP_URL}` (p. ej. con `envsubst`) antes de `gcloud run services replace`. Nota: `deploy/dlp-template.json` documenta una plantilla de desidentificación, pero el código de DLP (`core/dlp_sanitizer.py`) hace `inspect_content` en línea y no la usa.
+
+---
+
+## 3.b Model Armor real (`gcp_live`)
+
+Por defecto el guardrail es `LocalModelArmorGuard` (regex léxicas, `backend/app/core/model_armor.py`). Para usar el servicio real:
+
+1. Habilitar la API y crear una plantilla en la misma región que `GCP_LOCATION` (los nombres de flags pueden variar con la versión de `gcloud`; revisá `gcloud model-armor templates create --help`):
+   ```bash
+   gcloud services enable modelarmor.googleapis.com
+   gcloud model-armor templates create aegisbank-template --location=$REGION \
+     --pi-and-jailbreak-filter-settings-enforcement=enabled \
+     --pi-and-jailbreak-filter-settings-confidence-level=medium-and-above
+   ```
+2. Dar a la Service Account del backend permiso de uso:
+   ```bash
+   gcloud projects add-iam-policy-binding $PROJECT_ID \
+     --member="serviceAccount:$SA_EMAIL" --role="roles/modelarmor.user"
+   ```
+   (`deploy/iam-setup.sh` ya lo hace en el paso 4b.)
+3. Configurar `SECURITY_MODE=gcp_live`, `USE_GCP_MODEL_ARMOR=true`, `MODEL_ARMOR_TEMPLATE_ID=aegisbank-template`, `GCP_PROJECT_ID` y `GCP_LOCATION` (ver `.env.production.example`; con `make up-prod`).
+4. Para leer el comprobante desde un bucket: `USE_GCS_INGESTION=true`, `GCS_BUCKET_NAME=<bucket>` y el rol `roles/storage.objectViewer` sobre ese bucket. Si el objeto no existe se usa `backend/local_storage/comprobante.txt`.
+
+**Comportamiento a tener en cuenta**
+
+- El mismo `ModelArmorGuard` inspecciona el mensaje del usuario y el contenido del documento que lee `read_document_tool`.
+- Si Model Armor no marca amenaza, el texto igual pasa por el guardrail local. Si falla la llamada a GCP, se registra una advertencia y se usa el guardrail local (la PoC no falla cerrado ante un error del servicio).
+- En la PoC el comprobante está escrito para parecer un documento legítimo, de modo que **se espera que pase** Model Armor: el ataque 3.1 es semántico y no contiene firmas léxicas de jailbreak. Si en tu plantilla lo bloquea, la corrida termina en `BLOCKED` desde el sanitizer y eso es un resultado válido de medición.
+
+**Estado de la evidencia:** el flujo con Model Armor real **no está verificado** en este repositorio. Falta una corrida en `gcp_live` con un proyecto GCP propio; cuando se haga, `make attack` la guarda en `docs/evidence/runs/` con el modo `gcp_live` en su cabecera.
 
 ---
 
@@ -122,3 +175,10 @@ gcloud logging read "resource.type=cloud_run_revision AND resource.labels.servic
   --limit 30 \
   --format "table(timestamp, textPayload)"
 ```
+
+
+## Nota: política OPA (PDP) en el despliegue
+
+El `pep_node` consulta la política OPA en `PDP_URL` (en `docker-compose.yml` apunta al servicio `opa`). `deploy/cloudrun-service.yaml` **no despliega OPA** (solo define `PDP_URL`): sin PDP accesible se aplica `PDP_FALLBACK_MODE` (por defecto `deny`) y cada alta de destinatario y cada transferencia termina `FAILED`. Para un despliegue funcional hay que publicar OPA (p. ej. un segundo servicio de Cloud Run, con una imagen `openpolicyagent/opa` que incluya `policies/` y ejecute `opa run --server --addr=0.0.0.0:$PORT /policies`; ese paso no está automatizado ni probado en este repo) y configurar `PDP_URL=https://<servicio-opa>/v1/data/transaction/decision`. Si el servicio OPA exige autenticación, el backend tendría que enviar un token de identidad, y `pep_node` hoy no lo hace: dejá OPA accesible solo desde el backend por red interna o ingress restringido. Con `PDP_FALLBACK_MODE=hitl` las transferencias pasan a aprobación humana, pero las altas siguen fallando cerradas. El despliegue en GCP no forma parte de la demo local de la PoC.
+
+Además, `CHECKPOINTER_TYPE=firestore` hoy usa igualmente `MemorySaver` (ver `docs/architecture.md`, sección 4).

@@ -6,7 +6,10 @@
 
 DOCKER_COMPOSE ?= docker compose
 
-.PHONY: help up-dev up-prod down logs ps test restart-dev restart-prod
+.PHONY: help up-dev up-prod down logs ps test restart-dev restart-prod opa-up attack attack-n attack-control server-results
+
+PYTHON ?= $(shell [ -x backend/.venv/bin/python ] && echo backend/.venv/bin/python || echo python3)
+N ?= 5
 
 help:
 	@echo ""
@@ -17,11 +20,17 @@ help:
 	@echo "  make logs         Muestra los logs en tiempo real de los contenedores"
 	@echo "  make ps           Muestra el estado de los contenedores"
 	@echo "  make test         Ejecuta los tests automatizados con pytest"
+	@echo "  make opa-up       Levanta solo la política OPA (PDP) en localhost:8181"
+	@echo "  make attack       Ejecuta y narra el escenario 3.1 (LLM real; levanta OPA)"
+	@echo "  make attack-n N=5 Repite el escenario N veces y reporta tasas"
+	@echo "  make attack-control  Caso de contraste: transferencia a destinatario no confiable (debe ir a HITL)"
+	@echo "  make server-results  Abre el visor HTML de corridas guardadas (sin LLM ni Docker)"
 	@echo "  make restart-dev  Reinicia el entorno local de desarrollo"
 	@echo "  make restart-prod Reinicia el entorno de producción"
 	@echo ""
 
 up-dev:
+	@[ -f .env.development ] || { cp .env.development.example .env.development && echo "📝 Creado .env.development desde el ejemplo: completá al menos una API key de LLM."; }
 	@echo "🚀 Levantando entorno local de desarrollo (con mocks y .env.development)..."
 	$(DOCKER_COMPOSE) --env-file .env.development up --build
 	@echo ""
@@ -35,6 +44,7 @@ up-dev:
 	@echo "Tip: Usa 'make logs' para ver los logs o 'make down' para detenerlos."
 
 up-prod:
+	@[ -f .env.production ] || { cp .env.production.example .env.production && echo "📝 Creado .env.production desde el ejemplo: completalo antes de continuar." && exit 1; }
 	@echo "☁️  Levantando entorno de producción en la nube GCP (.env.production)..."
 	$(DOCKER_COMPOSE) --env-file .env.production up --build
 	@echo ""
@@ -65,6 +75,27 @@ test:
 	else \
 		pytest backend/tests -v; \
 	fi
+
+opa-up:
+	@echo "🛡️  Levantando OPA (PDP) en http://localhost:8181 ..."
+	$(DOCKER_COMPOSE) up -d --wait opa
+
+# Ataque 3.1 contra el grafo real: requiere credenciales LLM en .env y OPA arriba.
+# Un ataque exitoso NO es un error: el exit code es != 0 solo ante errores del grafo o de configuración.
+attack: opa-up
+	$(PYTHON) scripts/demo_attack.py $(ARGS)
+
+attack-n: opa-up
+	$(PYTHON) scripts/demo_attack.py --runs $(N) $(ARGS)
+
+# Caso de contraste (no es un ataque): transferencia directa a un destinatario no confiable. Debe terminar en HITL.
+attack-control: opa-up
+	$(PYTHON) scripts/demo_attack.py --scenario control_hitl_untrusted_recipient_over_threshold $(ARGS)
+
+# Visor offline de las corridas guardadas en docs/evidence (no requiere LLM). RESULTS_PORT=8765 por defecto.
+RESULTS_PORT ?= 8765
+server-results:
+	python3 scripts/serve_results.py --port $(RESULTS_PORT)
 
 restart-dev: down up-dev
 

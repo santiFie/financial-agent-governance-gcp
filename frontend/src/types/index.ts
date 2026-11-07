@@ -12,6 +12,16 @@ export interface SecurityMetadata {
   threat_category?: string;
   defense_action: 'PASSED' | 'DEIDENTIFIED' | 'BLOCKED';
   processing_time_ms: number;
+  trace_id?: string;
+}
+
+export interface TimelineEvent {
+  stage: string;
+  node: string;
+  title: string;
+  detail?: string | null;
+  added_by_replan: boolean;
+  data?: Record<string, unknown> | null;
 }
 
 export interface PendingTransferInfo {
@@ -31,9 +41,11 @@ export interface ChatMessage {
   sender: 'user' | 'agent' | 'system';
   text: string;
   timestamp: string;
-  status?: 'COMPLETED' | 'BLOCKED' | 'PENDING_APPROVAL';
+  status?: 'COMPLETED' | 'BLOCKED' | 'FAILED' | 'PENDING_APPROVAL';
   security_audit?: SecurityMetadata;
   pending_transfer?: PendingTransferInfo;
+  timeline?: TimelineEvent[];
+  attached_document?: string;
 }
 
 export interface BankAccount {

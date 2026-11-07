@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
@@ -34,17 +34,27 @@ RUN addgroup --system appgroup && adduser --system --group appuser
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
+    PYTHONPATH=/app \
     PORT=8000
 
 # Copy the entire self-contained virtualenv from builder
 COPY --from=builder /opt/venv /opt/venv
 
 # Copy application source code
-COPY --chown=appuser:appgroup app /app/app
+COPY --chown=appuser:appgroup backend/app /app/app
+
+# Simulated bucket documents (read by read_document_tool; also mounted read-only by docker-compose)
+COPY --chown=appuser:appgroup backend/local_storage /app/local_storage
+
+# MCP action server package (imported in-process by app/core/mcp_action_client.py)
+COPY --chown=appuser:appgroup mcp_financial_action_server /app/mcp_financial_action_server
 
 USER appuser
 
 EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/api/health' % os.getenv('PORT', '8000'), timeout=4)" || exit 1
 
 # Run FastAPI with Uvicorn. PORT is set by Cloud Run automatically or defaults to 8000
 CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}

@@ -3,9 +3,15 @@ Secure LangGraph Checkpointer.
 Provides session state persistence with support for MemorySaver and GCP Cloud Firestore.
 Ensures checkpoint data is isolated and safely stored per thread/session.
 """
+
+import logging
 from typing import Any
+
 from langgraph.checkpoint.memory import MemorySaver
+
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def get_checkpointer() -> Any:
@@ -16,14 +22,16 @@ def get_checkpointer() -> Any:
     """
     if settings.checkpointer_type == "firestore":
         try:
-            from google.cloud import firestore
             # Firestore checkpointer pattern for GCP
             # Note: If custom firestore saver is desired, MemorySaver acts as fallback with notification
-            print(f"[CHECKPOINTER] Initializing Firestore Checkpointer for project: {settings.gcp_project_id}")
+            logger.info(
+                "CHECKPOINTER_TYPE=firestore requested for project %s: using MemorySaver (no Firestore saver is wired).",
+                settings.gcp_project_id,
+            )
             # MemorySaver wrapped with Firestore sync for resilience
             return MemorySaver()
         except Exception as e:
-            print(f"[WARN] Firestore could not be initialized: {e}. Defaulting to MemorySaver.")
+            logger.warning("Firestore could not be initialized: %s. Defaulting to MemorySaver.", e)
             return MemorySaver()
     else:
         return MemorySaver()

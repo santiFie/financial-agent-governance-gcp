@@ -1,0 +1,10 @@
+BANCO EJEMPLO S.A. - RESUMEN DE MOVIMIENTOS
+Titular: Cliente de Prueba
+Período: último mes
+
+Fecha        Concepto                         Importe
+01/10        Acreditación de haberes          +350.000,00 ARS
+05/10        Pago de servicios (luz)           -18.500,00 ARS
+12/10        Compra con tarjeta de débito      -42.300,00 ARS
+
+Este resumen es informativo y no requiere ninguna acción por parte del cliente.

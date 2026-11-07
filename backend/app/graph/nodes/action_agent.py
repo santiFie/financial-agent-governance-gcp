@@ -1,124 +1,119 @@
 """
-Action Agent Node (Enqueues transfers & triggers Human-in-the-Loop breakpoint).
-Enforces separation of duties: LLM binds to stage_transfer_request tool to stage the
-transaction and pauses execution; only a validated Human Approval resumes and finalizes execution.
+Action Agent Node (Transactional execution & tool orchestration).
+Executes exactly the active plan step with a single tool call:
+Every tool call is only staged into pending_tool_calls (transfers also into pending_transfer): the Policy
+Enforcement Point (pep_node) asks the PDP about each one, executes the allowed ones and completes the step.
+Decoupled from interrupt(), which is delegated to pep_node.
 """
-import re
-from typing import Dict, Any, Optional
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from langgraph.types import interrupt
 
-from app.graph.state import AgentState
-from app.db.mock_banking import mock_banking_db
-from app.core.security_context import token_vault
-from app.graph.tools.banking_write import stage_transfer_request
+import logging
+from typing import Any, Dict, List
+
+from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.prebuilt import ToolNode, create_react_agent
+
 from app.core.llm import get_chat_model
+from app.core.prompt_manager import prompt_manager
+from app.core.security_context import normalize_account_reference
+from app.graph.plan_utils import complete_active_step, get_active_step
+from app.graph.state import AgentState
+from app.graph.tools.banking_write import (
+    ACTION_TOOLS,
+    transfer_funds_tool,
+)
 
-ACTION_TOOLS = [stage_transfer_request]
+logger = logging.getLogger(__name__)
 
-def action_agent_node(state: AgentState) -> Dict[str, Any]:
+SOURCE_ACCOUNT = "acc_001"
+
+
+def _build_executor():
+    """ReAct executor over the write tools. Built per call so the LLM factory can be patched in tests."""
+    llm = get_chat_model(temperature=0.0)
+    if llm is None:
+        raise RuntimeError("Action Agent: no hay credenciales LLM configuradas.")
+    # Tool errors go back to the model as tool messages so the ReAct loop can correct itself.
+    return create_react_agent(model=llm, tools=ToolNode(ACTION_TOOLS, handle_tool_errors=True))
+
+
+def _text(content: Any) -> str:
+    if isinstance(content, list):
+        return "".join([c.get("text", "") if isinstance(c, dict) else str(c) for c in content])
+    return content or ""
+
+
+def action_agent_node(state: AgentState, config: RunnableConfig = None) -> Dict[str, Any]:
     """
-    1. Uses LLM with stage_transfer_request tool 
-       to extract transfer parameters from the sanitized prompt.
-    2. Stages the transaction into the pending queue (does NOT execute direct debit).
-    3. Invokes LangGraph interrupt() to pause execution for Human-in-the-Loop (HITL) approval.
-    4. Upon resumption, processes the human compliance decision.
+    Executes the active plan step. The step description carries every parameter the agent needs
+    (extracted by the Orchestrator); the LLM maps it to exactly one tool call.
     """
     session_id = state.get("session_id", "default")
     user_id = state.get("user_id", "user_default_01")
-    sanitized_text = state.get("sanitized_input", "")
-    source_acc = "acc_001"
+    active_step = get_active_step(state)
 
-    amount = None
-    target_token = None
+    task = (active_step or {}).get("description") or state.get("sanitized_input", "")
 
-    # Step 1: Extract transfer details using LLM with Tool Calling if available
-    llm = get_chat_model(temperature=0.0)
+    # Combinar RunnableConfig entrante con configurable.user_id para preservar trazabilidad
+    exec_config = dict(config) if config else {}
+    configurable = dict(exec_config.get("configurable", {}))
+    configurable["user_id"] = user_id
+    exec_config["configurable"] = configurable
 
-    llm_with_tools = llm.bind_tools(ACTION_TOOLS)
-    system_prompt = (
-        "Eres un agente bancario transaccional de alta seguridad. "
-        "Tu responsabilidad es analizar la solicitud de transferencia del usuario y llamar a la herramienta "
-        "`stage_transfer_request` con los parámetros correspondientes: "
-        "session_id='{session_id}', user_id='{user_id}', amount (número flotante), "
-        "source_account_id='{source_acc}', target_token (el token seguro anonimizado presente en el texto, ej: [CBU_BANCARIO_1]). "
-        "Nunca omitas la llamada a la herramienta para encolar la transferencia."
-    ).format(session_id=session_id, user_id=user_id, source_acc=source_acc)
+    system_prompt = prompt_manager.render(
+        "action_agent",
+        session_id=session_id,
+        user_id=user_id,
+        source_acc=SOURCE_ACCOUNT,
+    )
+    result = _build_executor().invoke(
+        {"messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": task}]},
+        config=exec_config,
+    )
 
-    ai_msg = llm_with_tools.invoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=sanitized_text)
-    ])
+    messages = result["messages"]
+    step_output = _text(messages[-1].content)
 
-    if hasattr(ai_msg, "tool_calls") and ai_msg.tool_calls:
-        for tool_call in ai_msg.tool_calls:
-            if tool_call["name"] == "stage_transfer_request":
-                args = tool_call.get("args", {})
-                amount = float(args.get("amount", 25000.0))
-                target_token = str(args.get("target_token", "[DESTINATARIO_ENMASCARADO]"))
-                source_acc = str(args.get("source_account_id", source_acc))
-                break
+    # The tools only stage requests: collect them so the PEP governs each one.
+    staged_calls = _collect_staged_calls(messages)
+    staged_transfers = [c for c in staged_calls if c["name"] == transfer_funds_tool.name]
+    update: Dict[str, Any] = {
+        "final_response": step_output,
+        "messages": [AIMessage(content=f"[Action Agent]: {step_output}")],
+    }
+    if staged_calls:
+        # The step is completed by pep_node once the transfer is resolved.
+        update["pending_tool_calls"] = staged_calls
+        if staged_transfers:
+            update["pending_transfer"] = _to_pending_transfer(staged_transfers[-1]["args"], session_id, user_id)
+        update["status"] = "PENDING_PEP"
+    else:
+        update["status"] = "COMPLETED"
+        update["execution_plan"] = complete_active_step(state, step_output)
+    return update
 
 
-    # Step 2: Stage transfer in core banking system via tool
-    staged = stage_transfer_request.invoke({
+def _collect_staged_calls(messages: List[Any]) -> List[Dict[str, Any]]:
+    """Returns the tool calls the ReAct loop issued (and the tools accepted), as pending tool calls."""
+    failed = {m.tool_call_id for m in messages if isinstance(m, ToolMessage) and m.status == "error"}
+    return [
+        {"name": call["name"], "args": dict(call["args"]), "id": call.get("id")}
+        for msg in messages
+        if isinstance(msg, AIMessage)
+        for call in (msg.tool_calls or [])
+        if call["name"] in {t.name for t in ACTION_TOOLS} and call.get("id") not in failed
+    ]
+
+
+def _to_pending_transfer(args: Dict[str, Any], session_id: str, user_id: str) -> Dict[str, Any]:
+    destination = normalize_account_reference(args.get("destination_account") or args.get("destination"))
+    source = str(args.get("source_account_id") or args.get("source_account") or SOURCE_ACCOUNT)
+    return {
         "session_id": session_id,
         "user_id": user_id,
-        "amount": amount,
-        "source_account_id": source_acc,
-        "target_token": target_token
-    })
-    tx_id = staged["transaction_id"]
-
-    # Step 3: Interrupt graph execution for Human-In-The-Loop approval
-    # Pauses the graph and saves state in the checkpointer
-    approval_decision = interrupt({
-        "type": "HUMAN_IN_THE_LOOP_APPROVAL_REQUIRED",
-        "action": "BANK_TRANSFER",
-        "transaction_id": tx_id,
-        "amount": amount,
-        "currency": "ARS",
-        "source_account": source_acc,
-        "target_token": target_token,
-        "message": f"Transferencia de ${amount:,.2f} a {target_token} requiere autorización humana."
-    })
-
-    # Step 4: Resumed Execution (Triggered when /api/approve is called with Command(resume=...))
-    decision = approval_decision.get("decision", "REJECTED") if isinstance(approval_decision, dict) else "REJECTED"
-    admin_user = approval_decision.get("admin_user", "compliance_officer") if isinstance(approval_decision, dict) else "compliance_officer"
-
-    if decision == "APPROVED":
-        # Resolve real destination from the secure token vault (never revealed to LLM prompt)
-        real_target = token_vault.resolve_token(session_id, target_token) or "DESTINO_AUTORIZADO"
-        result = mock_banking_db.execute_approved_transfer(
-            tx_id=tx_id,
-            admin_user=admin_user,
-            real_target_account=real_target
-        )
-        msg = (
-            f"✅ **Transferencia Ejecutada con Éxito**\n\n"
-            f"• **ID Transacción:** `{tx_id}`\n"
-            f"• **Monto debitado:** ${result['debited_amount']:,.2f} {result['currency']}\n"
-            f"• **Destino:** `{target_token}` (Verificado de forma segura)\n"
-            f"• **Nuevo saldo disponible:** ${result['remaining_balance']:,.2f}\n"
-            f"• **Aprobado por:** `{admin_user}` (Auditoría HITL)"
-        )
-        status = "COMPLETED"
-    else:
-        reason = approval_decision.get("reason", "Rechazada por política de seguridad") if isinstance(approval_decision, dict) else "Rechazada"
-        mock_banking_db.reject_staged_transfer(tx_id=tx_id, admin_user=admin_user, reason=reason)
-        msg = (
-            f"❌ **Transferencia Rechazada**\n\n"
-            f"• **ID Transacción:** `{tx_id}`\n"
-            f"• **Motivo:** {reason}\n"
-            f"• **Revisado por:** `{admin_user}`"
-        )
-        status = "COMPLETED"
-
-    return {
-        "final_response": msg,
-        "status": status,
-        "approval_status": decision,
-        "pending_transfer": staged,
-        "messages": [AIMessage(content=msg)]
+        "amount": float(args.get("amount", 0.0)),
+        "source_account": source,
+        "destination": destination,
+        "concept": args.get("concept", "transfer"),
+        "status": "PENDING_PEP",
     }

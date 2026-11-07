@@ -2,30 +2,43 @@
 FastAPI Main Application.
 Exposes endpoints for chat, Human-in-the-Loop approvals, telemetry, and pending transfers.
 """
+
+import logging
 import time
-from typing import List, Dict, Any, Optional
+from typing import List
+
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
 from app.config import settings
+from app.core.mcp_action_client import mcp_action_client
+from app.core.telemetry import build_trace_config, get_telemetry_status
+from app.core.timeline import TimelineBuilder, pdp_decision_observer
+from app.db.mock_banking import mock_banking_db
+from app.graph.graph import financial_graph
 from app.models.api_schemas import (
-    ChatRequest,
-    ChatResponse,
     ApproveRequest,
     ApproveResponse,
-    SecurityMetadata,
+    ChatRequest,
+    ChatResponse,
+    DetectedPII,
     PendingTransferInfo,
-    DetectedPII
+    SecurityMetadata,
+    TimelineEvent,
 )
-from app.graph.graph import financial_graph
-from app.db.mock_banking import mock_banking_db
+
+logging.basicConfig(
+    level=logging.DEBUG if settings.debug else logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
-    description="Backend API para el Asistente Financiero Multi-Agente con Defense-in-Depth en GCP"
+    description="Backend API para el Asistente Financiero Multi-Agente con Defense-in-Depth en GCP",
 )
 
 # Enable CORS for frontend integration
@@ -46,7 +59,8 @@ def health_check():
         "environment": settings.environment,
         "security_mode": settings.security_mode,
         "checkpointer": settings.checkpointer_type,
-        "gcp_project": settings.gcp_project_id
+        "gcp_project": settings.gcp_project_id,
+        "telemetry": get_telemetry_status(),
     }
 
 
@@ -60,23 +74,35 @@ async def chat_endpoint(request: ChatRequest):
     session_id = request.session_id
     user_id = request.user_id or "user_default_01"
 
-    config = {"configurable": {"thread_id": session_id}}
+    config, trace_id = build_trace_config(
+        session_id=session_id, user_id=user_id, endpoint="/api/chat", run_name="financial_assistant_chat_turn"
+    )
+    logger.info(f"[Chat] session={session_id} trace_id={trace_id} document={request.document_name}")
 
     initial_state = {
         "messages": [HumanMessage(content=request.message)],
         "raw_input": request.message,
+        "document_name": request.document_name,
         "session_id": session_id,
         "user_id": user_id,
-        "status": "IN_PROGRESS"
+        "status": "IN_PROGRESS",
     }
 
+    timeline = TimelineBuilder()
+    observer_token = pdp_decision_observer.set(timeline.on_pdp_decision)
     try:
-        # Run graph until completion or breakpoint interrupt
-        result = financial_graph.invoke(initial_state, config=config)
+        # Runs until completion or until interrupt(); a HITL pause is read back from the checkpointed state below.
+        # Streaming "updates" only records what each node did (timeline); it does not change the execution.
+        for chunk in financial_graph.stream(initial_state, config=config, stream_mode="updates"):
+            for node_name, node_update in chunk.items():
+                timeline.add_update(node_name, node_update)
     except Exception as e:
-        # LangGraph raises when an interrupt is triggered depending on invocation style,
-        # or we inspect current graph state
-        pass
+        logger.exception("Error ejecutando el grafo para la sesión %s", session_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error ejecutando el grafo: {str(e)}"
+        )
+    finally:
+        pdp_decision_observer.reset(observer_token)
 
     # Inspect current state from checkpointer
     graph_state = financial_graph.get_state(config)
@@ -85,10 +111,7 @@ async def chat_endpoint(request: ChatRequest):
 
     # Prepare Security Metadata
     detected_pii_raw = state_values.get("detected_pii", [])
-    detected_pii_objs = [
-        p if isinstance(p, DetectedPII) else DetectedPII(**p)
-        for p in detected_pii_raw
-    ]
+    detected_pii_objs = [p if isinstance(p, DetectedPII) else DetectedPII(**p) for p in detected_pii_raw]
 
     security_audit = SecurityMetadata(
         sanitized_input=state_values.get("sanitized_input", request.message),
@@ -96,17 +119,15 @@ async def chat_endpoint(request: ChatRequest):
         prompt_injection_flagged=state_values.get("is_threat", False),
         threat_category=state_values.get("threat_category"),
         defense_action=state_values.get("defense_action", "PASSED"),
-        processing_time_ms=elapsed_ms
+        processing_time_ms=elapsed_ms,
+        trace_id=trace_id,
     )
 
     # Check if graph paused at a Human-in-the-Loop breakpoint
     if graph_state and graph_state.next:
         # Graph is currently interrupted awaiting human input
         # Retrieve staged transfer details
-        pending_list = [
-            t for t in mock_banking_db.get_pending_transfers()
-            if t.get("session_id") == session_id
-        ]
+        pending_list = [t for t in mock_banking_db.get_pending_transfers() if t.get("session_id") == session_id]
         pending_info = None
         if pending_list:
             t = pending_list[-1]
@@ -119,7 +140,7 @@ async def chat_endpoint(request: ChatRequest):
                 source_account=t["source_account"],
                 target_token=t["target_token"],
                 status=t["status"],
-                created_at=t["created_at"]
+                created_at=t["created_at"],
             )
 
         return ChatResponse(
@@ -131,10 +152,12 @@ async def chat_endpoint(request: ChatRequest):
                 "Por política de seguridad bancaria, esta operación requiere autorización humana previa "
                 "por parte del oficial de cumplimiento antes de impactar los fondos."
             ),
-            intent="transfer",
             status="PENDING_APPROVAL",
             security_audit=security_audit,
-            pending_transfer=pending_info
+            pending_transfer=pending_info,
+            document_name=state_values.get("document_name", request.document_name),
+            execution_plan=state_values.get("execution_plan"),
+            timeline=[TimelineEvent(**e) for e in timeline.events],
         )
 
     # If graph finished normally or was blocked
@@ -144,10 +167,12 @@ async def chat_endpoint(request: ChatRequest):
     return ChatResponse(
         session_id=session_id,
         response=final_resp,
-        intent=state_values.get("current_intent", "general"),
-        status="BLOCKED" if is_blocked else "COMPLETED",
+        status="BLOCKED" if is_blocked else ("FAILED" if state_values.get("status") == "FAILED" else "COMPLETED"),
         security_audit=security_audit,
-        pending_transfer=None
+        pending_transfer=None,
+        document_name=state_values.get("document_name", request.document_name),
+        execution_plan=state_values.get("execution_plan"),
+        timeline=[TimelineEvent(**e) for e in timeline.events],
     )
 
 
@@ -157,33 +182,47 @@ async def approve_endpoint(request: ApproveRequest):
     Human-in-the-Loop Resumption Endpoint.
     Authorizes or rejects a paused transfer and resumes the LangGraph execution.
     """
-    config = {"configurable": {"thread_id": request.session_id}}
+    config, trace_id = build_trace_config(
+        session_id=request.session_id,
+        user_id=request.admin_user,
+        endpoint="/api/approve",
+        run_name="financial_assistant_hitl_resumption",
+        extra_metadata={
+            "transaction_id": request.transaction_id,
+            "decision": request.decision,
+            "admin_user": request.admin_user,
+        },
+        extra_tags=["hitl-approval"],
+    )
     graph_state = financial_graph.get_state(config)
 
     if not graph_state or not graph_state.next:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"La sesión {request.session_id} no tiene una ejecución en pausa esperando aprobación."
+            detail=f"La sesión {request.session_id} no tiene una ejecución en pausa esperando aprobación.",
+        )
+
+    staged = mock_banking_db.pending_transfers.get(request.transaction_id)
+    if staged is None or staged.get("session_id") != request.session_id or staged.get("status") != "PENDING_APPROVAL":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"La transacción {request.transaction_id} no está pendiente de aprobación en la sesión {request.session_id}.",
         )
 
     # Resume graph execution using Command(resume=...)
     try:
         resumed_result = financial_graph.invoke(
-            Command(resume={
-                "decision": request.decision,
-                "admin_user": request.admin_user,
-                "reason": request.reason
-            }),
-            config=config
+            Command(resume={"decision": request.decision, "admin_user": request.admin_user, "reason": request.reason}),
+            config=config,
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error reanudando la ejecución del grafo: {str(e)}"
+            detail=f"Error reanudando la ejecución del grafo: {str(e)}",
         )
 
     # Check updated balance if executed
-    accounts = mock_banking_db.get_account_balances("user_default_01")
+    accounts = mcp_action_client.read_account_balances(staged["user_id"])
     primary_balance = accounts[0]["balance"] if accounts else None
 
     return ApproveResponse(
@@ -192,7 +231,7 @@ async def approve_endpoint(request: ApproveRequest):
         decision=request.decision,
         status="EXECUTED" if request.decision == "APPROVED" else "REJECTED",
         message=resumed_result.get("final_response", "Operación resuelta."),
-        final_balance=primary_balance
+        final_balance=primary_balance,
     )
 
 
@@ -210,7 +249,7 @@ def get_pending_transfers_endpoint():
             source_account=p["source_account"],
             target_token=p["target_token"],
             status=p["status"],
-            created_at=p["created_at"]
+            created_at=p["created_at"],
         )
         for p in pending
     ]
@@ -221,6 +260,6 @@ def get_user_accounts(user_id: str = "user_default_01"):
     """Returns accounts and balances for user profile dashboard."""
     return {
         "user_id": user_id,
-        "accounts": mock_banking_db.get_account_balances(user_id),
-        "recent_transactions": mock_banking_db.get_recent_transactions(user_id, limit=5)
+        "accounts": mcp_action_client.read_account_balances(user_id),
+        "recent_transactions": mcp_action_client.read_recent_transactions(user_id, limit=5),
     }

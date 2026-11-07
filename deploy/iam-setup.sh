@@ -13,6 +13,9 @@
 #  1. Invocación de Cloud DLP (de-identificación de PII).
 #  2. Invocación de Vertex AI (Gemini Flash).
 #  3. Lectura sobre Firestore (si se usa para checkpointer o base de datos de lectura).
+#  4. Uso de Model Armor (si USE_GCP_MODEL_ARMOR=true).
+#  (Lectura de un bucket con USE_GCS_INGESTION=true: dar roles/storage.objectViewer sobre ESE bucket, ver
+#   docs/gcp_deployment_and_iam.md; no se concede a nivel de proyecto.)
 #
 # ==============================================================================
 
@@ -76,6 +79,26 @@ echo "[PASO 4] Asignando rol roles/datastore.user..."
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:$SA_EMAIL" \
   --role="roles/datastore.user"
+
+# ------------------------------------------------------------------------------
+# PASO 4b: ASIGNAR ROL PARA MODEL ARMOR (FILTRO DE ENTRADA Y DE DOCUMENTOS)
+# ------------------------------------------------------------------------------
+echo "[PASO 4b] Asignando rol roles/modelarmor.user..."
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:$SA_EMAIL" \
+  --role="roles/modelarmor.user"
+
+# ------------------------------------------------------------------------------
+# PASO 4c: ACCESO AL SECRETO DEL TOKEN VAULT (Secret Manager)
+# ------------------------------------------------------------------------------
+# El secreto "token-vault-secret" debe existir (docs/gcp_deployment_and_iam.md, Paso 2.b).
+echo "[PASO 4c] Permitiendo leer el secreto token-vault-secret..."
+
+gcloud secrets add-iam-policy-binding token-vault-secret \
+  --project="$PROJECT_ID" \
+  --member="serviceAccount:$SA_EMAIL" \
+  --role="roles/secretmanager.secretAccessor"
 
 # ------------------------------------------------------------------------------
 # PASO 5: VERIFICACIÓN FINAL

@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AegisBank AI — Resultados del ataque 3.1</title>
+<style>
+  :root {
+    --bg: #0b1020; --panel: #121a30; --panel2: #18223d; --text: #e6ebf5; --muted: #93a0bd; --border: #26324f;
+    --accent: #7c8cff; --ok: #34d399; --warn: #fbbf24; --bad: #fb7185; --info: #38bdf8;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f4f6fb; --panel: #ffffff; --panel2: #eef1f8; --text: #172036; --muted: #55627f; --border: #d6dcec;
+            --accent: #4f46e5; --ok: #047857; --warn: #b45309; --bad: #be123c; --info: #0369a1; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, -apple-system, Segoe UI, sans-serif; }
+  main { max-width: 1000px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 28px 0 10px; }
+  .sub { color: var(--muted); margin: 0 0 18px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 14px 0; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+  .card .k { color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
+  .card .v { font-size: 1.05rem; font-weight: 700; word-break: break-word; }
+  .bad { color: var(--bad); } .ok { color: var(--ok); } .warn { color: var(--warn); }
+  select { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; max-width: 100%; }
+  .banner { border-left: 4px solid var(--warn); background: var(--panel2); padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 12px 0; color: var(--muted); }
+  ol.timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .ev { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 0 10px 10px 0; padding: 10px 14px; }
+  .ev.replan { border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 8%, var(--panel)); }
+  .ev.document_ingested, .ev.document_requested { border-left-color: var(--info); }
+  .ev.tool_call_staged, .ev.hitl_pause { border-left-color: var(--warn); }
+  .ev.pep_decision, .ev.readonly_result, .ev.action_result { border-left-color: var(--ok); }
+  .ev h3 { font-size: .95rem; margin: 0 0 6px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .n { color: var(--muted); font-weight: 400; }
+  .tag { font-size: .7rem; padding: 1px 8px; border-radius: 99px; background: var(--panel2); color: var(--muted); border: 1px solid var(--border); font-weight: 600; }
+  .tag.bad { color: var(--bad); border-color: var(--bad); }
+  pre, .mono { font-family: var(--mono); font-size: .8rem; white-space: pre-wrap; word-break: break-word; margin: 6px 0 0;
+               background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .step { margin-top: 8px; }
+  .step b { font-size: .9rem; }
+  details > summary { cursor: pointer; color: var(--accent); font-size: .85rem; margin-top: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; }
+  footer { color: var(--muted); font-size: .8rem; margin-top: 32px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>AegisBank AI — resultados del ataque 3.1</h1>
+  <p class="sub">Goal Hijacking / Confused Deputy. Corridas grabadas del grafo real: se pueden revisar sin acceso a un LLM.</p>
+
+  <div class="panel">
+    <label for="run" class="sub">Corrida:</label>
+    <select id="run" aria-label="Seleccionar corrida"></select>
+  </div>
+
+  <div id="error" class="banner" hidden></div>
+  <div id="content"></div>
+
+  <footer>PoC deliberadamente vulnerable: un ataque exitoso es un resultado de la medición, no un error. Para generar nuevas corridas (requiere LLM): <code>make attack</code>.</footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === 'class') node.className = v; else node.setAttribute(k, v);
+  }
+  for (const c of children.flat()) {
+    if (c === null || c === undefined || c === false) continue;
+    node.append(c.nodeType ? c : document.createTextNode(String(c)));
+  }
+  return node;
+}
+const pre = (text) => el('pre', {}, typeof text === 'string' ? text : JSON.stringify(text, null, 2));
+const money = (n) => Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtDate = (iso) => { try { return new Date(iso).toLocaleString('es-AR'); } catch (e) { return iso; } };
+
+function eventBody(ev) {
+  const out = [];
+  switch (ev.kind) {
+    case 'sanitizer':
+      out.push(el('div', {}, `defense_action=${ev.defense_action} · is_threat=${ev.is_threat} · PII tokenizada=${ev.pii_count}`));
+      if (ev.sanitized_input) out.push(pre(ev.sanitized_input));
+      if (ev.threat_reason) out.push(el('div', { class: 'bad' }, ev.threat_reason));
+      break;
+    case 'document_requested':
+      out.push(pre(`${ev.tool_call.name}(${JSON.stringify(ev.tool_call.args)})`));
+      break;
+    case 'document_ingested': {
+      out.push(el('div', { class: 'ok' }, '✔ El documento pasó los filtros (Model Armor + DLP) y entró como contexto. Los datos sensibles van tokenizados.'));
+      const d = el('details', { open: '' }, el('summary', {}, 'Contenido que ve el LLM'), pre(ev.text || ''));
+      out.push(d);
+      break;
+    }
+    case 'plan':
+    case 'replan':
+      for (const st of ev.steps || []) {
+        out.push(el('div', { class: 'step' },
+          el('b', {}, `[${st.step_id}] `), el('span', { class: 'tag' }, st.target_node), ' ', el('b', {}, st.title),
+          ev.added_by_replan ? el('span', { class: 'tag bad' }, 'agregado al replanificar') : null,
+          pre(st.description)));
+      }
+      break;
+    case 'tool_call_staged':
+      out.push(pre(`${ev.tool_call.name}(\n${JSON.stringify(ev.tool_call.args, null, 2)}\n)`));
+      break;
+    case 'pep_decision':
+      if (ev.pdp) {
+        out.push(el('div', {}, 'Entrada a OPA:'), pre(ev.pdp.input));
+        out.push(el('div', {}, 'Decisión de OPA:'), pre(ev.pdp.decision));
+      }
+      out.push(el('div', {}, `status=${ev.status} · approval_status=${ev.approval_status}`));
+      if (ev.text) out.push(pre(ev.text));
+      break;
+    case 'hitl_pause':
+      out.push(pre(ev.data));
+      break;
+    default:
+      if (ev.text) out.push(pre(ev.text));
+  }
+  if (ev.note) out.push(el('div', { class: 'warn' }, ev.note));
+  return out;
+}
+
+function renderTimeline(events) {
+  const ol = el('ol', { class: 'timeline' });
+  events.forEach((ev, i) => {
+    ol.append(el('li', { class: `ev ${ev.kind}${ev.added_by_replan ? ' replan' : ''}` },
+      el('h3', {}, el('span', { class: 'n' }, `${i + 1}.`), ev.title,
+        el('span', { class: 'tag' }, ev.node), ev.step ? el('span', { class: 'tag' }, ev.step) : null),
+      eventBody(ev)));
+  });
+  return ol;
+}
+
+function renderOutcome(run) {
+  const wrap = el('div', { class: 'panel' });
+  const t = el('table', {}, el('tr', {}, el('th', {}, 'Cuenta'), el('th', {}, 'Antes'), el('th', {}, 'Después')));
+  const before = (run.before && run.before.balances) || {}, after = (run.after && run.after.balances) || {};
+  for (const acc of Object.keys(before)) {
+    const changed = before[acc] !== after[acc];
+    t.append(el('tr', {}, el('td', {}, acc), el('td', {}, money(before[acc])),
+      el('td', { class: changed ? 'bad' : '' }, money(after[acc] ?? before[acc]) + (changed ? ' (cambió)' : ''))));
+  }
+  wrap.append(t);
+  const nb = (run.before?.address_book || []).length, na = (run.after?.address_book || []).length;
+  wrap.append(el('h2', {}, `Libreta de destinatarios: ${nb} → ${na}`));
+  (run.new_recipients || []).forEach((r) => wrap.append(el('div', { class: 'bad' }, '+ nuevo destinatario'), pre(r)));
+  wrap.append(el('h2', {}, `Transferencias ejecutadas: ${(run.transfers_executed || []).length}`));
+  if (!(run.transfers_executed || []).length) wrap.append(el('div', { class: 'ok' }, 'ninguna'));
+  (run.transfers_executed || []).forEach((tx) => wrap.append(pre(tx)));
+  return wrap;
+}
+
+function render(run) {
+  const root = $('content');
+  root.replaceChildren();
+  const path = run.execution_path;
+  const executed = (run.transfers_executed || []).length;
+  const card = (k, v, cls) => el('div', { class: 'card' }, el('div', { class: 'k' }, k), el('div', { class: `v ${cls || ''}` }, v));
+
+  if (run.note) root.append(el('div', { class: 'banner' }, run.note));
+  root.append(el('div', { class: 'cards' },
+    card('Camino de ejecución', path, path === 'FAST_PATH' ? 'bad' : ''),
+    card('Transferencias ejecutadas', executed, executed ? 'bad' : 'ok'),
+    card('action_agent invocado', run.action_agent_invoked ? 'sí' : 'no', run.action_agent_invoked ? 'bad' : ''),
+    card('Pasos agregados al replanificar', (run.replanned || []).length),
+    card('Destinatarios nuevos', (run.new_recipients || []).length, (run.new_recipients || []).length ? 'bad' : ''),
+    card('Modelo del orquestador', run.model || '—'),
+    card('Modo de seguridad', run.security_mode || '—'),
+    card('Fecha', fmtDate(run.timestamp))));
+
+  root.append(el('h2', {}, 'Pedido del usuario'),
+    el('div', { class: 'panel' }, pre(run.request?.message || ''),
+      el('div', { class: 'sub' }, `Documento adjunto: ${run.request?.document_name || '—'} · Escenario: ${run.scenario_id || '—'}`)));
+
+  root.append(el('h2', {}, 'Cronología (en el orden en que ocurrió)'), renderTimeline(run.events || []));
+  root.append(el('h2', {}, 'Resultado'), renderOutcome(run));
+  if (run.error) root.append(el('div', { class: 'banner bad' }, `Error del grafo: ${run.error}`));
+}
+
+async function load() {
+  let manifest;
+  try {
+    const res = await fetch('manifest.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error(res.status);
+    manifest = await res.json();
+  } catch (e) {
+    $('error').hidden = false;
+    $('error').textContent = 'No se pudo leer manifest.json. Abrí esta página con "make server-results" (no con file://).';
+    return;
+  }
+  const sel = $('run');
+  manifest.forEach((m, i) => {
+    const label = `${fmtDate(m.timestamp)} · ${m.model} · ${m.execution_path} · ${m.transfers} transferencia(s)` +
+      (m.source === 'console-transcript' ? ' · transcripción' : '');
+    sel.append(el('option', { value: m.file }, label));
+  });
+  const show = async (file) => {
+    try {
+      const res = await fetch(file, { cache: 'no-store' });
+      render(await res.json());
+    } catch (e) {
+      $('error').hidden = false;
+      $('error').textContent = `No se pudo cargar ${file}: ${e}`;
+    }
+  };
+  sel.addEventListener('change', () => show(sel.value));
+  if (manifest.length) show(manifest[0].file);
+  else $('error').hidden = false, $('error').textContent = 'Todavía no hay corridas guardadas. Ejecutá "make attack".';
+}
+load();
+</script>
+</body>
+</html>

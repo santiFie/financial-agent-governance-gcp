@@ -1,0 +1,13 @@
+# Lint + format for the backend, the MCP action server and the demo scripts (run from backend/: `ruff check . ../mcp_financial_action_server ../scripts`).
+line-length = 120
+target-version = "py311"
+extend-exclude = [".venv"]
+
+[lint]
+select = ["E", "F", "I", "W"]
+ignore = [
+    "E501",  # long lines: handled by the formatter where possible, prompts and messages are intentionally long
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["E402"]  # tests import app modules after adjusting sys.path

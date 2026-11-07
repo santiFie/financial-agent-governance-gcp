@@ -1,0 +1,12 @@
+Copyright (c) 2026 Santiago Fierro. All rights reserved.
+
+AegisBank AI is a proof of concept written as the final project of the postgraduate course
+"Seguridad y Gobernanza en Agentes de IA" (Facultad de Informática). It is shared for academic
+evaluation and educational use only: you may read, run and study it locally.
+
+THIS SOFTWARE IS DELIBERATELY VULNERABLE. It reproduces a security threat (Goal Hijacking /
+Confused Deputy) on purpose and has no semantic defenses. Do not deploy it with real credentials,
+real customer data or real funds. Any other use (including commercial use or redistribution)
+requires the author's written permission.
+
+The software is provided "as is", without warranty of any kind.

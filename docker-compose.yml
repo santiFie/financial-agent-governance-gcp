@@ -1,8 +1,8 @@
 services:
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: financial_assistant_backend
     ports:
       - "8000:8000"
@@ -15,8 +15,31 @@ services:
       - CHECKPOINTER_TYPE=${CHECKPOINTER_TYPE:-memory}
       - FIRESTORE_COLLECTION=${FIRESTORE_COLLECTION:-financial_assistant_checkpoints}
       - TOKEN_VAULT_SECRET=${TOKEN_VAULT_SECRET:-development-secret-key-32-chars!}
+      - PDP_URL=${PDP_URL:-http://opa:8181/v1/data/transaction/decision}
+      - LLM_PROVIDER=${LLM_PROVIDER:-litellm}
+      - LLM_MODEL=${LLM_MODEL:-}
+      - ORCHESTRATOR_PROVIDER=${ORCHESTRATOR_PROVIDER:-}
+      - ORCHESTRATOR_MODEL=${ORCHESTRATOR_MODEL:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - USE_GCS_INGESTION=${USE_GCS_INGESTION:-false}
+      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME:-}
+      - USE_GCP_MODEL_ARMOR=${USE_GCP_MODEL_ARMOR:-false}
+      - MODEL_ARMOR_TEMPLATE_ID=${MODEL_ARMOR_TEMPLATE_ID:-}
+      - PDP_FALLBACK_MODE=${PDP_FALLBACK_MODE:-deny}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY:-}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-false}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT:-financial-assistant-agents}
+      - LANGCHAIN_ENDPOINT=${LANGCHAIN_ENDPOINT:-https://api.smith.langchain.com}
+    depends_on:
+      opa:
+        condition: service_healthy
     volumes:
       - ./backend/app:/app/app:ro
+      - ./backend/local_storage:/app/local_storage:ro
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" ]
@@ -32,13 +55,54 @@ services:
       dockerfile: Dockerfile
     container_name: financial_assistant_frontend
     ports:
-      - "3000:80"
+      - "3000:8080"
     depends_on:
       backend:
         condition: service_healthy
     restart: unless-stopped
     networks:
       - default
+
+  mcp_action_server:
+    build:
+      context: ./mcp_financial_action_server
+      dockerfile: Dockerfile
+    container_name: financial_mcp_action_server
+    ports:
+      - "8001:8001"
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - MCP_SERVER_PORT=8001
+      - DAILY_TRANSFER_LIMIT=1000000.0
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - default
+
+  opa:
+    image: openpolicyagent/opa:1.4.2-static
+    command:
+      - "run"
+      - "--server"
+      - "--addr=0.0.0.0:8181"
+      - "--log-level=info"
+      - "--log-format=json"
+      - "--set=decision_logs.console=true"
+      - "/policies"
+    ports:
+      - "8181:8181"
+    volumes:
+      - ./policies:/policies:ro
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "/opa", "eval", "--fail", "-d", "/policies", "data.transaction.decision" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 networks:
   default:

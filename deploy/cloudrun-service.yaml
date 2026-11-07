@@ -11,7 +11,9 @@ spec:
       annotations:
         # Cost minimization: Scale to 0 instances when idle (zero fixed compute cost)
         autoscaling.knative.dev/minScale: "0"
-        autoscaling.knative.dev/maxScale: "2"
+        # One instance only: the MCP server storage, the token vault and the checkpointer are in-memory, so a second
+        # instance would not see the address book or the paused HITL transfers of the first one.
+        autoscaling.knative.dev/maxScale: "1"
         # CPU is only allocated during request processing to conserve GCP credits
         run.googleapis.com/cpu-throttling: "true"
         # Dedicated Service Account placeholder (configured in deploy/iam-setup.sh)
@@ -39,6 +41,25 @@ spec:
           value: "us-central1"
         - name: VERTEX_MODEL_NAME
           value: "gemini-1.5-flash-002"
+        - name: LLM_PROVIDER
+          value: "vertexai"
+        # Reversible token vault key. Create it first: gcloud secrets create token-vault-secret --data-file=-
+        - name: TOKEN_VAULT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: token-vault-secret
+              key: latest
+        # Real Model Armor template (docs/gcp_deployment_and_iam.md, section 3.b)
+        - name: USE_GCP_MODEL_ARMOR
+          value: "true"
+        - name: MODEL_ARMOR_TEMPLATE_ID
+          value: "${MODEL_ARMOR_TEMPLATE_ID}"
+        # OPA is not deployed by this file: publish it separately and set its decision URL, e.g.
+        # https://<opa-service>/v1/data/transaction/decision. Without a reachable PDP every transfer fails closed.
+        - name: PDP_URL
+          value: "${PDP_URL}"
+        - name: PDP_FALLBACK_MODE
+          value: "deny"
         - name: CHECKPOINTER_TYPE
           value: "firestore"
         - name: FIRESTORE_COLLECTION

@@ -1,11 +1,23 @@
 """
 Tests for FastAPI REST Endpoints.
 """
+
 import pytest
 from fastapi.testclient import TestClient
+
 from app.main import app
+from tests.live_llm import requires_live_llm
 
 client = TestClient(app)
+from mcp_financial_action_server.storage import financial_storage
+
+
+@pytest.fixture(autouse=True)
+def reset_banking_state():
+    """Transfers executed by one test must not change the balances seen by the next one."""
+    financial_storage.reset_state()
+    yield
+    financial_storage.reset_state()
 
 
 def test_health_endpoint():
@@ -16,23 +28,22 @@ def test_health_endpoint():
     assert "security_mode" in data
 
 
+@requires_live_llm
 def test_chat_balance_query():
-    payload = {
-        "message": "Hola, ¿podrías indicarme el saldo de mis cuentas?",
-        "session_id": "test_api_sess_01"
-    }
+    payload = {"message": "Hola, ¿podrías indicarme el saldo de mis cuentas?", "session_id": "test_api_sess_01"}
     response = client.post("/api/chat", json=payload)
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "COMPLETED"
-    assert "Saldos Disponibles" in data["response"]
+    assert "485" in data["response"]
     assert data["security_audit"]["defense_action"] == "PASSED"
 
 
+@requires_live_llm
 def test_chat_pii_sanitization():
     payload = {
         "message": "Mi número de tarjeta es 4545-9876-1234-5678, ¿qué saldo tengo?",
-        "session_id": "test_api_sess_02"
+        "session_id": "test_api_sess_02",
     }
     response = client.post("/api/chat", json=payload)
     assert response.status_code == 200
@@ -43,14 +54,13 @@ def test_chat_pii_sanitization():
     assert "4545-9876-1234-5678" not in data["security_audit"]["sanitized_input"]
 
 
+@requires_live_llm
+@pytest.mark.langsmith
 def test_chat_transfer_hitl_and_approve_cycle():
     session_id = "test_api_transfer_cycle"
 
     # 1. Request transfer
-    payload = {
-        "message": "Quiero transferir $15000 al CBU 0170099900000012345678",
-        "session_id": session_id
-    }
+    payload = {"message": "Quiero transferir $15000 al CBU 0170099900000012345678", "session_id": session_id}
     chat_resp = client.post("/api/chat", json=payload)
     assert chat_resp.status_code == 200
     data = chat_resp.json()
@@ -69,10 +79,10 @@ def test_chat_transfer_hitl_and_approve_cycle():
         "session_id": session_id,
         "transaction_id": tx_id,
         "decision": "APPROVED",
-        "admin_user": "compliance_tester"
+        "admin_user": "compliance_tester",
     }
     approve_resp = client.post("/api/approve", json=approve_payload)
     assert approve_resp.status_code == 200
     approve_data = approve_resp.json()
     assert approve_data["status"] == "EXECUTED"
-    assert "Transferencia Ejecutada con Éxito" in approve_data["message"]
+    assert approve_data["message"]

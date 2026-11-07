@@ -1,0 +1,20 @@
+# Build context for `gcloud builds submit .` (repo root; see deploy/cloudbuild-backend.yaml and backend/Dockerfile).
+# The image only needs backend/app, backend/local_storage, backend/requirements.txt and mcp_financial_action_server.
+.git
+.gitignore
+.venv
+**/.venv
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+.env*
+!.env*.example
+frontend
+docs
+scripts
+policies
+.worktrees
+.agents
+.claude
+backend/tests
+mcp_financial_action_server/tests
