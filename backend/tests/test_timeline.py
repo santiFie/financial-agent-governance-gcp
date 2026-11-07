@@ -62,3 +62,9 @@ def test_chat_response_includes_timeline_with_pdp_decision():
     pep = next(e for e in events if e["stage"] == "pep_decision")
     assert pep["data"]["pdp"]["decision"]["reason"] == "Fast-Path"
     assert any(e["added_by_replan"] for e in events)
+
+
+def test_builder_skips_pep_node_when_no_transfer_was_staged():
+    b = TimelineBuilder()
+    b.add_update("pep_node", {"status": "COMPLETED", "approval_status": "NONE"})
+    assert b.events == []

@@ -26,6 +26,7 @@ class TimelineBuilder:
         self.events: List[Dict[str, Any]] = []
         self._seen_steps = 0
         self._pdp_decisions: List[Dict[str, Any]] = []
+        self._pdp_reported = 0
 
     def _add(self, stage: str, node: str, title: str, detail: Optional[str] = None,
              added_by_replan: bool = False, data: Optional[Dict[str, Any]] = None) -> None:
@@ -96,6 +97,10 @@ class TimelineBuilder:
                       _compact(u.get("final_response"), 300))
 
     def _on_pep_node(self, u: Dict[str, Any]) -> None:
+        # A step that staged no transfer (e.g. registering a recipient) crosses pep_node without a decision.
+        if len(self._pdp_decisions) == self._pdp_reported and not u.get("final_response"):
+            return
+        self._pdp_reported = len(self._pdp_decisions)
         decision = self._pdp_decisions[-1] if self._pdp_decisions else None
         detail = f"status={u.get('status')}, approval_status={u.get('approval_status')}"
         if decision:
