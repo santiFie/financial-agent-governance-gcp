@@ -5,10 +5,14 @@ Uses pydantic-settings to manage environment variables with strong typing.
 import os
 from typing import Literal, Optional
 from dotenv import load_dotenv
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 load_dotenv()
+
+DEFAULT_TOKEN_VAULT_SECRET = "super-secret-vault-key-change-in-prod-32bytes!"
+WEAK_TOKEN_VAULT_SECRETS = {DEFAULT_TOKEN_VAULT_SECRET, "development-secret-key-32-chars!"}
+
 
 class Settings(BaseSettings):
     # Application & Environment
@@ -54,8 +58,9 @@ class Settings(BaseSettings):
     checkpointer_type: Literal["memory", "firestore"] = "memory"
     firestore_collection: str = "langgraph_checkpoints"
 
-    # Secret key for the reversible token vault (never leaked to LLM)
-    token_vault_secret: str = "super-secret-vault-key-change-in-prod-32bytes!"
+    # Secret key for the reversible token vault (never leaked to LLM).
+    # The default is for local development only: ENVIRONMENT=production refuses to start with it.
+    token_vault_secret: str = DEFAULT_TOKEN_VAULT_SECRET
 
     # Observability & Tracing (LangSmith / Langfuse)
     langchain_tracing_v2: bool = False
@@ -87,6 +92,12 @@ class Settings(BaseSettings):
     # Orchestrator Agent safety limits
     orchestrator_max_plan_steps: int = Field(default=8, description="Maximum number of steps an execution plan may contain")
     orchestrator_max_tool_iterations: int = Field(default=3, description="Maximum consecutive Orchestrator tool rounds before a plan update")
+
+    @model_validator(mode="after")
+    def _require_own_vault_secret_in_production(self):
+        if self.environment == "production" and self.token_vault_secret in WEAK_TOKEN_VAULT_SECRETS:
+            raise ValueError("TOKEN_VAULT_SECRET debe definirse con un valor propio cuando ENVIRONMENT=production.")
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",

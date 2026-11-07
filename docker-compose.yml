@@ -25,7 +25,15 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - USE_GCS_INGESTION=${USE_GCS_INGESTION:-false}
+      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME:-}
+      - USE_GCP_MODEL_ARMOR=${USE_GCP_MODEL_ARMOR:-false}
+      - MODEL_ARMOR_TEMPLATE_ID=${MODEL_ARMOR_TEMPLATE_ID:-}
+      - PDP_FALLBACK_MODE=${PDP_FALLBACK_MODE:-deny}
       - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY:-}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-false}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT:-financial-assistant-agents}
+      - LANGCHAIN_ENDPOINT=${LANGCHAIN_ENDPOINT:-https://api.smith.langchain.com}
     depends_on:
       opa:
         condition: service_healthy

@@ -28,6 +28,7 @@ help:
 	@echo ""
 
 up-dev:
+	@[ -f .env.development ] || { cp .env.development.example .env.development && echo "📝 Creado .env.development desde el ejemplo: completá al menos una API key de LLM."; }
 	@echo "🚀 Levantando entorno local de desarrollo (con mocks y .env.development)..."
 	$(DOCKER_COMPOSE) --env-file .env.development up --build
 	@echo ""
@@ -41,6 +42,7 @@ up-dev:
 	@echo "Tip: Usa 'make logs' para ver los logs o 'make down' para detenerlos."
 
 up-prod:
+	@[ -f .env.production ] || { cp .env.production.example .env.production && echo "📝 Creado .env.production desde el ejemplo: completalo antes de continuar." && exit 1; }
 	@echo "☁️  Levantando entorno de producción en la nube GCP (.env.production)..."
 	$(DOCKER_COMPOSE) --env-file .env.production up --build
 	@echo ""
