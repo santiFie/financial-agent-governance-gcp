@@ -10,7 +10,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from app.graph.nodes.action_agent import action_agent_node
-from app.graph.tools.banking_write import register_recipient_tool, transfer_funds_tool
+from app.graph.tools.banking_write import register_recipient_tool, transfer_funds_tool, execute_register_recipient
 from app.core.mcp_action_client import mcp_action_client, MCPActionClient
 from app.core.security_context import token_vault
 from mcp_financial_action_server.storage import financial_storage
@@ -28,18 +28,25 @@ def clean_storage_and_vault():
         token_vault._vault.clear()
 
 
-def test_register_recipient_tool_direct_execution():
-    """Validates that register_recipient_tool persists recipient into FastMCP address book."""
+def test_register_recipient_tool_only_stages_the_request():
+    """The tool does not touch the address book: the PEP executes it once the PDP allows it."""
+    staged = register_recipient_tool.invoke({
+        "user_id": "user_test_00", "recipient_name": "Proveedor", "cbu": "0170099900000012345678",
+    })
+
+    assert staged["status"] == "PENDING_PEP"
+    assert not financial_storage.address_book.get("user_test_00")
+
+
+def test_execute_register_recipient_persists_into_the_address_book():
+    """Validates that the real mutation persists the recipient into FastMCP address book."""
     user_id = "user_test_01"
     cbu = "0170099900000012345678"
     recipient_name = "Fideicomiso Recaudador Fiscal"
 
-    receipt = register_recipient_tool.invoke({
-        "user_id": user_id,
-        "recipient_name": recipient_name,
-        "cbu": cbu,
-        "alias": "fideicomiso.afip"
-    })
+    receipt = execute_register_recipient(
+        user_id=user_id, recipient_name=recipient_name, cbu=cbu, alias="fideicomiso.afip"
+    )
 
     assert receipt["status"] == "REGISTERED"
     assert receipt["holder_name"] == recipient_name
@@ -57,8 +64,8 @@ def test_register_recipient_tool_direct_execution():
     assert mcp_action_client.is_trusted_recipient(user_id, "0000000000000000000000") == False
 
 
-def test_register_recipient_tool_with_token_resolution():
-    """Validates that register_recipient_tool resolves tokenized surrogate CBUs via TokenVault."""
+def test_execute_register_recipient_with_token_resolution():
+    """Validates that the registration resolves tokenized surrogate CBUs via TokenVault."""
     session_id = "sess_token_reg_01"
     user_id = "user_test_02"
     token = "[CBU_BANCARIO_1]"
@@ -66,12 +73,9 @@ def test_register_recipient_tool_with_token_resolution():
 
     token_vault.store_token(session_id, token, raw_cbu)
 
-    receipt = register_recipient_tool.invoke({
-        "user_id": user_id,
-        "recipient_name": "Fideicomiso Recaudador Fiscal",
-        "cbu": token,
-        "session_id": session_id,
-    })
+    receipt = execute_register_recipient(
+        user_id=user_id, recipient_name="Fideicomiso Recaudador Fiscal", cbu=token, session_id=session_id
+    )
 
     assert receipt["status"] == "REGISTERED"
     assert receipt["cbu_or_cvu"] == raw_cbu
@@ -149,8 +153,8 @@ def test_action_agent_stages_transfer_for_pep_and_leaves_step_open():
     assert "execution_plan" not in result  # step completion is delegated to pep_node
 
 
-def test_action_agent_registers_recipient_and_completes_step():
-    """register_recipient_tool executes directly; no transfer is staged and the step is completed."""
+def test_action_agent_stages_recipient_registration_for_pep():
+    """A registration is only staged (like a transfer): nothing is registered and the PEP completes the step."""
     user_id = "user_default_01"
     cbu = "0170099900000012345678"
     register_call = {
@@ -169,10 +173,11 @@ def test_action_agent_registers_recipient_and_completes_step():
         state,
     )
 
-    assert mcp_action_client.is_trusted_recipient(user_id, cbu)
-    assert result["status"] == "COMPLETED"
-    assert "pending_tool_calls" not in result and "pending_transfer" not in result
-    assert result["execution_plan"][0]["result"] == "Destinatario registrado."
+    assert not mcp_action_client.is_trusted_recipient(user_id, cbu)
+    assert result["status"] == "PENDING_PEP"
+    assert [c["name"] for c in result["pending_tool_calls"]] == ["register_recipient_tool"]
+    assert "pending_transfer" not in result
+    assert "execution_plan" not in result  # step completion is delegated to pep_node
 
 
 def test_action_agent_tool_error_is_returned_to_the_model_and_loop_continues():
@@ -191,5 +196,6 @@ def test_action_agent_tool_error_is_returned_to_the_model_and_loop_continues():
         state,
     )
 
-    assert result["status"] == "COMPLETED"
+    assert result["status"] == "COMPLETED"  # the invalid call is not staged
+    assert "pending_tool_calls" not in result
     assert "inválido" in result["execution_plan"][0]["result"]

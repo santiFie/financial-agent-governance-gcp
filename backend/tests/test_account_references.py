@@ -4,7 +4,7 @@ import pytest
 from app.core.mcp_action_client import mcp_action_client
 from app.core.security_context import normalize_account_reference, token_vault
 from app.graph.tools.banking_read import get_account_balances, get_recent_transactions
-from app.graph.tools.banking_write import register_recipient_tool, transfer_funds_tool
+from app.graph.tools.banking_write import execute_register_recipient, transfer_funds_tool
 from mcp_financial_action_server.storage import financial_storage
 
 CBU = "0170099900000012345678"
@@ -33,8 +33,8 @@ def test_normalize_account_reference(value, expected):
 def test_register_recipient_accepts_token_with_or_without_brackets():
     token_vault.store_token("sess_refs", "[CBU_BANCARIO_1]", CBU)
 
-    receipt = register_recipient_tool.invoke(
-        {"user_id": "user_default_01", "recipient_name": "Proveedor", "cbu": "CBU_BANCARIO_1", "session_id": "sess_refs"}
+    receipt = execute_register_recipient(
+        user_id="user_default_01", recipient_name="Proveedor", cbu="CBU_BANCARIO_1", session_id="sess_refs"
     )
 
     assert receipt["cbu_or_cvu"] == CBU
@@ -42,9 +42,7 @@ def test_register_recipient_accepts_token_with_or_without_brackets():
 
 
 def test_register_recipient_accepts_a_real_cbu():
-    receipt = register_recipient_tool.invoke(
-        {"user_id": "user_default_01", "recipient_name": "Proveedor", "cbu": CBU}
-    )
+    receipt = execute_register_recipient(user_id="user_default_01", recipient_name="Proveedor", cbu=CBU)
 
     assert receipt["cbu_or_cvu"] == CBU
 

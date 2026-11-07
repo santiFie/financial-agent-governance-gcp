@@ -38,3 +38,22 @@ test_deny_without_input if {
 	d := transaction.decision with input as {}
 	not d.allow
 }
+
+test_allow_non_transfer_tool if {
+	d := transaction.decision with input as {"tool_name": "register_recipient_tool", "user_id": "u1"}
+	d.allow
+	not d.require_hitl
+}
+
+test_transfer_tool_name_keeps_amount_rules if {
+	d := transaction.decision with input as {"tool_name": "transfer_funds_tool", "amount": 60000, "is_trusted_recipient": true}
+	d.allow
+	d.require_hitl
+	d2 := transaction.decision with input as {"tool_name": "transfer_funds_tool", "amount": 1000, "is_trusted_recipient": true}
+	not d2.require_hitl
+}
+
+test_deny_transfer_tool_without_amount if {
+	d := transaction.decision with input as {"tool_name": "transfer_funds_tool"}
+	not d.allow
+}

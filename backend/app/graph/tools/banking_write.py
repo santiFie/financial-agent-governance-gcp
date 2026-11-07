@@ -8,8 +8,23 @@ from langchain_core.tools import tool
 from app.core.security_context import normalize_account_reference
 
 
-@tool
-def register_recipient_tool(
+def _resolve_cbu(cbu: str, session_id: Optional[str]) -> str:
+    """Resolves a DLP surrogate token (e.g. [CBU_BANCARIO_1]) to the real value; any other reference is returned as is."""
+    from app.core.security_context import token_vault
+
+    if not (cbu.startswith("[") and cbu.endswith("]")):
+        return cbu
+    token_val = token_vault.resolve_token(session_id, cbu) if session_id else None
+    if not token_val:
+        with token_vault._lock:
+            for tokens in token_vault._vault.values():
+                if cbu in tokens:
+                    token_val = tokens[cbu]
+                    break
+    return token_val.strip() if token_val else cbu
+
+
+def execute_register_recipient(
     user_id: str,
     recipient_name: str = "",
     cbu: str = "",
@@ -20,31 +35,16 @@ def register_recipient_tool(
     session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Registra una nueva cuenta o CBU/CVU/Alias en la agenda de destinatarios confiables
-    del cliente (FastMCP address book).
+    Registers the recipient in the FastMCP address book. It is the real mutation behind register_recipient_tool
+    and is only called by pep_node once the PDP has allowed the staged call.
     """
     from app.core.mcp_action_client import MCPActionClient
-    from app.core.security_context import token_vault
     from mcp_financial_action_server.storage import financial_storage
 
     effective_name = (holder_name or recipient_name or "Destinatario Registrado").strip()
     effective_cbu = normalize_account_reference(cbu or cbu_or_cvu)
     effective_bank = (bank_name or "Banco Destino").strip()
-
-    # Resolve token if CBU is a surrogate token (e.g. [CBU_BANCARIO_1])
-    resolved_cbu = effective_cbu
-    if effective_cbu.startswith("[") and effective_cbu.endswith("]"):
-        token_val = None
-        if session_id:
-            token_val = token_vault.resolve_token(session_id, effective_cbu)
-        if not token_val:
-            with token_vault._lock:
-                for s_id, tokens in token_vault._vault.items():
-                    if effective_cbu in tokens:
-                        token_val = tokens[effective_cbu]
-                        break
-        if token_val:
-            resolved_cbu = token_val.strip()
+    resolved_cbu = _resolve_cbu(effective_cbu, session_id)
 
     receipt = MCPActionClient.register_account(
         user_id=user_id,
@@ -60,6 +60,36 @@ def register_recipient_tool(
                 if rec.get("cbu_or_cvu") == resolved_cbu:
                     rec["token"] = effective_cbu
     return receipt
+
+
+@tool
+def register_recipient_tool(
+    user_id: str,
+    recipient_name: str = "",
+    cbu: str = "",
+    alias: Optional[str] = None,
+    holder_name: Optional[str] = None,
+    cbu_or_cvu: Optional[str] = None,
+    bank_name: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Solicita registrar una nueva cuenta o CBU/CVU/Alias en la agenda de destinatarios confiables
+    del cliente (FastMCP address book). No modifica la agenda hasta la resolución de gobernanza por el PEP.
+    """
+    from app.core.mcp_action_client import MCPActionClient  # noqa: F401  (puts the MCP server package on sys.path)
+    from mcp_financial_action_server.validation import validate_cbu_or_cvu
+
+    effective_cbu = normalize_account_reference(cbu or cbu_or_cvu)
+    # Validate the reference now so a malformed CBU goes back to the model like any other tool error.
+    validate_cbu_or_cvu(_resolve_cbu(effective_cbu, session_id))
+    return {
+        "status": "PENDING_PEP",
+        "user_id": user_id,
+        "recipient_name": (holder_name or recipient_name or "Destinatario Registrado").strip(),
+        "cbu": effective_cbu,
+        "alias": alias,
+    }
 
 
 @tool

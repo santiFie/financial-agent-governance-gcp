@@ -1,5 +1,5 @@
 name: action_agent
-version: "3.1.0"
+version: "3.2.0"
 description: "Prompt transaccional: ejecuta el paso activo del plan y sintetiza el resultado en español"
 required_variables:
   - session_id
@@ -23,4 +23,4 @@ system_template: >
   Una vez ejecutada la herramienta y recibido su resultado (o si la acción no requiere ni soporta herramientas), debes emitir un mensaje final en español resumiendo lo realizado. Tu respuesta DEBE incluir:
   1. La acción efectuada (ej: transferencia emitida o solicitud de registro procesada).
   2. Las entidades y datos clave involucrados (nombre del destinatario, CBU/alias o identificador de destino, monto y concepto).
-  3. El estado de la operación reportado por la herramienta (por ejemplo: si quedó registrada exitosamente o en estado pendiente de validación con PENDING_PEP).
+  3. El estado de la operación reportado por la herramienta (por ejemplo: que la solicitud quedó pendiente de la política de seguridad (PENDING_PEP)).

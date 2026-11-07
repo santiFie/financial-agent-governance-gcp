@@ -322,7 +322,8 @@ def test_pep_sends_opa_input_envelope_to_configured_url():
 
     args, kwargs = mock_post.call_args
     assert args[0] == settings.pdp_url
-    assert kwargs["json"] == {"input": {"user_id": "user_default_01", "amount": 1000.0, "is_trusted_recipient": True}}
+    assert kwargs["json"] == {"input": {"user_id": "user_default_01", "tool_name": "transfer_funds_tool", "amount": 1000.0,
+                                 "is_trusted_recipient": True}}
 
 
 def test_pep_blocks_when_pdp_denies():
@@ -431,3 +432,52 @@ def test_pep_reports_failure_when_mcp_rejects_the_transfer():
     assert result["status"] == "FAILED"
     assert "No se pudo ejecutar" in result["final_response"]
     assert financial_storage.get_account("acc_001").balance == initial_balance
+
+
+def _register_state(session_id: str, cbu: str) -> dict:
+    return {
+        "session_id": session_id,
+        "user_id": "user_default_01",
+        "execution_plan": [{"step_id": 1, "title": "t", "target_node": "action_agent", "description": "d", "result": None}],
+        "pending_tool_calls": [{
+            "name": "register_recipient_tool",
+            "args": {"user_id": "user_default_01", "recipient_name": "Proveedor", "cbu": cbu},
+        }],
+    }
+
+
+def test_pep_sends_registration_to_the_pdp_with_the_tool_name_and_registers_when_allowed():
+    cbu = "0170099900000012345678"
+    allow = _pdp_response({"allow": True, "require_hitl": False, "reason": "Herramienta sin movimiento de fondos"})
+
+    with patch("httpx.Client.post", return_value=allow) as mock_post, patch("app.graph.nodes.pep.interrupt") as interrupt:
+        result = pep_node(_register_state("sess_reg_allow", cbu))
+
+    assert mock_post.call_args.kwargs["json"] == {"input": {"user_id": "user_default_01", "tool_name": "register_recipient_tool"}}
+    interrupt.assert_not_called()
+    assert mcp_action_client.is_trusted_recipient("user_default_01", cbu)
+    assert result["status"] == "COMPLETED"
+    assert result["execution_plan"][0]["result"] == result["final_response"]
+    assert result["pending_tool_calls"] == []
+
+
+def test_pep_does_not_register_when_the_pdp_denies():
+    cbu = "0170099900000012345678"
+    deny = _pdp_response({"allow": False, "require_hitl": False, "reason": "no permitido"})
+
+    with patch("httpx.Client.post", return_value=deny):
+        result = pep_node(_register_state("sess_reg_deny", cbu))
+
+    assert not mcp_action_client.is_trusted_recipient("user_default_01", cbu)
+    assert result["status"] == "FAILED"
+    assert "no permitido" in result["final_response"]
+
+
+def test_pep_does_not_register_when_the_pdp_is_unavailable():
+    cbu = "0170099900000012345678"
+
+    with patch("httpx.Client.post", side_effect=httpx.ConnectError("down")):
+        result = pep_node(_register_state("sess_reg_down", cbu))
+
+    assert not mcp_action_client.is_trusted_recipient("user_default_01", cbu)
+    assert result["status"] == "FAILED"

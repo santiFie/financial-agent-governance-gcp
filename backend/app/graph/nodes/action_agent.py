@@ -1,15 +1,15 @@
 """
 Action Agent Node (Transactional execution & tool orchestration).
 Executes exactly the active plan step with a single tool call:
-- register_recipient_tool is executed immediately and completes the step.
-- transfer_funds_tool is staged into pending_tool_calls / pending_transfer so the Policy Enforcement Point
-  (pep_node) governs it and completes the step.
+Every tool call is only staged into pending_tool_calls (transfers also into pending_transfer): the Policy
+Enforcement Point (pep_node) asks the PDP about each one, executes the allowed ones and completes the step.
 Decoupled from interrupt(), which is delegated to pep_node.
 """
 import logging
 from langchain_core.runnables import RunnableConfig
 from typing import Dict, Any, List
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import ToolMessage
 from langgraph.prebuilt import ToolNode, create_react_agent
 from app.graph.state import AgentState
 from app.graph.plan_utils import get_active_step, complete_active_step
@@ -78,8 +78,9 @@ def action_agent_node(state: AgentState, config: RunnableConfig = None) -> Dict[
     messages = result["messages"]
     step_output = _text(messages[-1].content)
 
-    # transfer_funds_tool only stages a request: collect it so the PEP governs it.
-    staged_calls = _collect_staged_transfers(messages)
+    # The tools only stage requests: collect them so the PEP governs each one.
+    staged_calls = _collect_staged_calls(messages)
+    staged_transfers = [c for c in staged_calls if c["name"] == transfer_funds_tool.name]
     update: Dict[str, Any] = {
         "final_response": step_output,
         "messages": [AIMessage(content=f"[Action Agent]: {step_output}")],
@@ -87,7 +88,8 @@ def action_agent_node(state: AgentState, config: RunnableConfig = None) -> Dict[
     if staged_calls:
         # The step is completed by pep_node once the transfer is resolved.
         update["pending_tool_calls"] = staged_calls
-        update["pending_transfer"] = _to_pending_transfer(staged_calls[-1]["args"], session_id, user_id)
+        if staged_transfers:
+            update["pending_transfer"] = _to_pending_transfer(staged_transfers[-1]["args"], session_id, user_id)
         update["status"] = "PENDING_PEP"
     else:
         update["status"] = "COMPLETED"
@@ -95,14 +97,15 @@ def action_agent_node(state: AgentState, config: RunnableConfig = None) -> Dict[
     return update
 
 
-def _collect_staged_transfers(messages: List[Any]) -> List[Dict[str, Any]]:
-    """Returns the transfer_funds_tool calls the ReAct loop issued, as pending tool calls."""
+def _collect_staged_calls(messages: List[Any]) -> List[Dict[str, Any]]:
+    """Returns the tool calls the ReAct loop issued (and the tools accepted), as pending tool calls."""
+    failed = {m.tool_call_id for m in messages if isinstance(m, ToolMessage) and m.status == "error"}
     return [
         {"name": call["name"], "args": dict(call["args"]), "id": call.get("id")}
         for msg in messages
         if isinstance(msg, AIMessage)
         for call in (msg.tool_calls or [])
-        if call["name"] == transfer_funds_tool.name
+        if call["name"] in {t.name for t in ACTION_TOOLS} and call.get("id") not in failed
     ]
 
 

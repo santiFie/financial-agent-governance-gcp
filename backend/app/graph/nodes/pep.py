@@ -1,7 +1,8 @@
 """
 Policy Enforcement Point (PEP) Node.
 Security boundary enforcing authorization policies before funds are debited.
-Evaluates Policy Decision Point (PDP) responses to determine Fast-Path vs HITL interrupt.
+Every staged tool call is sent to the Policy Decision Point (PDP) together with its tool name.
+For transfers the PDP answer decides Fast-Path vs HITL interrupt.
 """
 import logging
 from typing import Dict, Any, List, Optional
@@ -48,8 +49,10 @@ def _execute_via_mcp(
     )
 
 
-def _execution_failed(state: AgentState, error: Exception, approval_status: str) -> "AwaitableDict":
-    msg = f"❌ **No se pudo ejecutar la transferencia**\n\n• Motivo: {error}"
+def _execution_failed(
+    state: AgentState, error: Exception, approval_status: str, action: str = "ejecutar la transferencia"
+) -> "AwaitableDict":
+    msg = f"❌ **No se pudo {action}**\n\n• Motivo: {error}"
     return AwaitableDict({
         "final_response": msg,
         "status": "FAILED",
@@ -99,30 +102,93 @@ def _pdp_fallback_decision() -> Dict[str, Any]:
     }
 
 
+TRANSFER_TOOL = "transfer_funds_tool"
+REGISTER_TOOL = "register_recipient_tool"
+
+
+def _govern_registration(state: AgentState, call: Dict[str, Any], user_id: str, session_id: str) -> Optional[str]:
+    """
+    Governs a staged register_recipient_tool call: asks the PDP and, if it allows the call, registers the recipient.
+    Returns the result text; raises PermissionError when the PDP does not allow it (or the MCP error if it fails).
+    """
+    from app.graph.tools.banking_write import execute_register_recipient
+
+    decision = _query_pdp({"user_id": user_id, "tool_name": REGISTER_TOOL})
+    if decision is None:
+        decision = _pdp_fallback_decision()
+    if not decision.get("allow", False):
+        raise PermissionError(decision.get("reason", "Operación bloqueada por política de seguridad"))
+    if decision.get("require_hitl", False):
+        raise PermissionError("La política exige aprobación humana y esta herramienta no la soporta.")
+
+    args = dict(call.get("args", {}))
+    args["user_id"] = user_id
+    args.setdefault("session_id", session_id)
+    receipt = execute_register_recipient(**args)
+    return (
+        f"✅ **Destinatario registrado en la agenda**\n\n"
+        f"• **Titular:** {receipt.get('holder_name')}\n"
+        f"• **Cuenta:** `{normalize_account_reference(args.get('cbu') or args.get('cbu_or_cvu'))}`\n"
+        f"• **Gobernanza PEP:** herramienta sin movimiento de fondos autorizada por el PDP."
+    )
+
+
 def pep_node(state: AgentState) -> AwaitableDict:
     """
-    Policy Enforcement Point (PEP) Node.
-    1. Inspects pending_tool_calls or pending_transfer staged by Action Agent.
-    2. Resolves surrogate tokens via TokenVault.
-    3. Verifies if destination is a trusted recipient via FastMCP address book.
-    4. Evaluates PDP policy at settings.pdp_url:
-       - Fast-Path (allow=True, require_hitl=False): executes direct transfer without interrupt().
-       - HITL (require_hitl=True): stages transfer in mock banking and halts at interrupt().
-       - Resumes on approval and finalizes transfer.
-    5. Marks the active step in execution_plan as completed before looping back to the Orchestrator.
-       Steps that stage no transfer are completed by the Action Agent itself, so nothing is pending here.
+    Policy Enforcement Point (PEP) Node. Every tool call staged by the Action Agent goes through it:
+    1. register_recipient_tool: the PDP is asked about the tool; if it allows it, the PEP registers the recipient.
+    2. transfer_funds_tool: see _govern_transfer (trusted-recipient check, Fast-Path or HITL).
+    The PDP receives the tool name and decides; the PEP only enforces. The step is completed here.
     """
     pending_tool_calls: List[Dict[str, Any]] = list(state.get("pending_tool_calls") or [])
-    pending_transfer = state.get("pending_transfer")
     user_id = state.get("user_id", "user_default_01")
     session_id = state.get("session_id", "default")
 
-    if not pending_tool_calls and not pending_transfer:
+    if not pending_tool_calls and not state.get("pending_transfer"):
         return AwaitableDict({
             "status": state.get("status", "COMPLETED"),
             "approval_status": state.get("approval_status", "NONE"),
         })
 
+    registered: List[str] = []
+    for call in pending_tool_calls:
+        if call.get("name") != REGISTER_TOOL:
+            continue
+        try:
+            registered.append(_govern_registration(state, call, user_id, session_id))
+        except Exception as e:
+            return _execution_failed(state, e, approval_status="NONE", action="registrar el destinatario")
+
+    has_transfer = any(c.get("name") == TRANSFER_TOOL for c in pending_tool_calls) or state.get("pending_transfer")
+    if registered and not has_transfer:
+        msg = "\n\n".join(registered)
+        return AwaitableDict({
+            "final_response": msg,
+            "status": "COMPLETED",
+            "approval_status": state.get("approval_status", "NONE"),
+            "pending_tool_calls": [],
+            "pending_transfer": None,
+            "execution_plan": _mark_current_step_completed(state, msg),
+            "messages": [AIMessage(content=msg)],
+        })
+
+    return _govern_transfer(state, pending_tool_calls, user_id, session_id)
+
+
+def _govern_transfer(
+    state: AgentState, pending_tool_calls: List[Dict[str, Any]], user_id: str, session_id: str
+) -> AwaitableDict:
+    """
+    Governs a staged transfer:
+    1. Resolves surrogate tokens via TokenVault.
+    2. Verifies if destination is a trusted recipient via FastMCP address book.
+    3. Evaluates PDP policy at settings.pdp_url:
+       - Fast-Path (allow=True, require_hitl=False): executes direct transfer without interrupt().
+       - HITL (require_hitl=True): stages transfer in mock banking and halts at interrupt().
+       - Resumes on approval and finalizes transfer.
+    4. Marks the active step in execution_plan as completed before looping back to the Orchestrator.
+    """
+    pending_transfer = state.get("pending_transfer")
     amount = None
     destination = None
     source_account = "acc_001"
@@ -131,7 +197,7 @@ def pep_node(state: AgentState) -> AwaitableDict:
     # Extract transfer details from pending_tool_calls
     for tool_call in pending_tool_calls:
         tc_name = tool_call.get("name")
-        if tc_name in ["transfer_funds_tool"]:
+        if tc_name == TRANSFER_TOOL:
             args = tool_call.get("args", {})
             amount = float(args.get("amount", 0.0))
             destination = normalize_account_reference(
@@ -184,6 +250,7 @@ def pep_node(state: AgentState) -> AwaitableDict:
     # Query Policy Decision Point (PDP) via HTTP POST
     pdp_payload = {
         "user_id": user_id,
+        "tool_name": TRANSFER_TOOL,
         "amount": amount,
         "is_trusted_recipient": is_trusted
     }
