@@ -55,6 +55,7 @@ def test_prompt_injection_short_circuits():
 
 
 @requires_live_llm
+@pytest.mark.langsmith
 def test_transfer_triggers_hitl_and_resumes():
     session_id = "test_sess_transfer_hitl"
     config = {"configurable": {"thread_id": session_id}}

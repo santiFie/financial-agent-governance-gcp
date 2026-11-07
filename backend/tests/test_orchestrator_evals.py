@@ -224,6 +224,7 @@ def test_plan_grounded_evaluator_uses_decision_model_score():
 # ==============================================================================
 
 @requires_live_llm
+@pytest.mark.langsmith
 @pytest.mark.parametrize(
     "item", load_ground_truth_data(), ids=[i["id"] for i in load_ground_truth_data()]
 )

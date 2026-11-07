@@ -56,6 +56,7 @@ def test_chat_pii_sanitization():
 
 
 @requires_live_llm
+@pytest.mark.langsmith
 def test_chat_transfer_hitl_and_approve_cycle():
     session_id = "test_api_transfer_cycle"
 

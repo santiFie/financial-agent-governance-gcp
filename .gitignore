@@ -34,3 +34,4 @@ sa-key.json
 .worktrees/
 
 .agents/*
+.claude/*
