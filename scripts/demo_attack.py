@@ -26,6 +26,7 @@ import sys
 import uuid
 import warnings
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
@@ -39,6 +40,7 @@ for _p in (ROOT_DIR, BACKEND_DIR):
 # warnings on every LLM call. They are harmless noise for the narration, so they are silenced for this script only.
 warnings.filterwarnings("ignore", message=r".*Pydantic serializer warnings.*", category=UserWarning)
 
+RESULTS_DIR = ROOT_DIR / "docs" / "evidence"
 SCENARIOS_FILE = BACKEND_DIR / "tests" / "data" / "attack_3_1_scenarios.json"
 DEFAULT_USER = "user_default_01"
 DOC_PREVIEW_CHARS = 700
@@ -135,6 +137,12 @@ class Narrator:
         self.paused_for_hitl = False
         self.final_response: Optional[str] = None
         self.status: Optional[str] = None
+        self.events: List[Dict[str, Any]] = []  # full, untruncated record of the run (feeds the HTML report)
+
+    def event(self, kind: str, title: str, node: str, step: Optional[str] = None, **fields: Any) -> Dict[str, Any]:
+        ev = {"kind": kind, "title": title, "node": node, "step": step, **fields}
+        self.events.append(ev)
+        return ev
 
     def out(self, text: str = "") -> None:
         if self.verbose:
@@ -154,6 +162,7 @@ class Narrator:
         if node == "__interrupt__":
             self.paused_for_hitl = True
             payload = getattr(update[0], "value", update[0]) if update else {}
+            self.event("hitl_pause", "Pausa HITL: se requiere aprobación humana", "pep_node", data=payload)
             self.out(f"\n{yellow('⏸  HITL')}: el grafo se pausó esperando aprobación humana → {_short(payload, 300)}")
             return
         if not isinstance(update, dict):
@@ -170,6 +179,9 @@ class Narrator:
     def _on_sanitizer(self, u: Dict[str, Any]) -> None:
         self.section("Sanitizer (DLP + Model Armor sobre el pedido)")
         pii = u.get("detected_pii") or []
+        self.event("sanitizer", "Sanitizer (DLP + Model Armor sobre el pedido)", "sanitizer",
+                   defense_action=u.get("defense_action"), is_threat=bool(u.get("is_threat")),
+                   pii_count=len(pii), sanitized_input=u.get("sanitized_input"), threat_reason=u.get("threat_reason"))
         self.out(f"defense_action={u.get('defense_action')}  is_threat={u.get('is_threat')}  PII tokenizada={len(pii)}")
         self.out(f"input saneado: {_short(u.get('sanitized_input'), 300)}")
         if u.get("is_threat"):
@@ -181,12 +193,17 @@ class Narrator:
             for call in getattr(msg, "tool_calls", None) or []:
                 if call.get("name") == "read_document_tool":
                     self.section("Orquestador pide leer el documento adjunto")
+                    self.event("document_requested", "Orquestador pide leer el documento adjunto", "router",
+                               tool_call={"name": call.get("name"), "args": call.get("args")})
                     self.out(f"read_document_tool({_short(call.get('args'))})")
         plan = u.get("execution_plan")
         if plan is not None and len(plan) > self.seen_steps:
             new = plan[self.seen_steps:]
             first = self.seen_steps == 0
-            self.section("Plan inicial del Orquestador" if first else "REPLAN: el Orquestador agregó pasos")
+            title = "Plan inicial del Orquestador" if first else "REPLAN: el Orquestador agregó pasos"
+            self.section(title)
+            self.event("plan" if first else "replan", title, "router", added_by_replan=not first,
+                       steps=[{k: st.get(k) for k in ("step_id", "title", "target_node", "description")} for st in new])
             for step in new:
                 marker = "" if first else red("  ← agregado al replanificar")
                 self.out(f"  [{step['step_id']}] {step['target_node']:<14} {bold(step['title'])}{marker}")
@@ -195,8 +212,9 @@ class Narrator:
             self.seen_steps = len(plan)
         if plan is not None:
             self.plan = list(plan)
-        if u.get("final_response") and self.verbose and u.get("status") in ("FAILED", "COMPLETED"):
+        if u.get("final_response") and u.get("status") in ("FAILED", "COMPLETED"):
             self.out(f"\nRespuesta del Orquestador: {_short(u['final_response'], 400)}")
+            self.event("orchestrator_answer", "Respuesta final del Orquestador", "router", text=u["final_response"])
 
     def _on_orchestrator_tools(self, u: Dict[str, Any]) -> None:
         for msg in u.get("orchestrator_scratchpad") or []:
@@ -204,6 +222,8 @@ class Narrator:
             if not isinstance(content, str) or not content:
                 continue
             self.document_read = True
+            self.event("document_ingested", "Documento ingerido: pasó Model Armor + DLP y entró como contexto",
+                       "orchestrator_tools", text=content)
             self.out(dim("Contenido que llega al LLM (ya pasó Model Armor + DLP; los datos sensibles van tokenizados):"))
             preview = content if len(content) <= DOC_PREVIEW_CHARS else content[:DOC_PREVIEW_CHARS] + "…"
             for line in preview.splitlines():
@@ -212,6 +232,8 @@ class Narrator:
 
     def _on_readonly_agent(self, u: Dict[str, Any]) -> None:
         self.section(f"readonly_agent [{self._active_step_label()}]")
+        self.event("readonly_result", "readonly_agent (lectura)", "readonly_agent",
+                   step=self._active_step_label(), text=u.get("final_response"))
         self.out(_short(u.get("final_response"), 400))
 
     def _on_action_agent(self, u: Dict[str, Any]) -> None:
@@ -219,9 +241,13 @@ class Narrator:
         calls = u.get("pending_tool_calls") or []
         for call in calls:
             self.staged.append(call)
+            self.event("tool_call_staged", f"Tool call en staging: {call.get('name')}", "action_agent",
+                       step=self._active_step_label(), tool_call={"name": call.get("name"), "args": call.get("args")})
             self.out(f"Tool call en staging: {bold(call.get('name'))}({_short(call.get('args'), 300)})")
         if not calls:
             self.out(_short(u.get("final_response") or "(paso completado sin transferencia en staging)", 300))
+            self.event("action_result", "action_agent ejecutó el paso (sin transferencia en staging)", "action_agent",
+                       step=self._active_step_label(), text=u.get("final_response"))
 
     def _on_pep_node(self, u: Dict[str, Any]) -> None:
         # A step that staged no transfer (e.g. registering a recipient) passes through pep_node without a decision.
@@ -229,6 +255,9 @@ class Narrator:
             return
         self.section(f"pep_node (Policy Enforcement Point) [{self._active_step_label()}]")
         self._pdp_reported = len(self.pdp_decisions)
+        self.event("pep_decision", "pep_node (Policy Enforcement Point)", "pep_node", step=self._active_step_label(),
+                   pdp=self.pdp_decisions[-1] if self.pdp_decisions else None, status=u.get("status"),
+                   approval_status=u.get("approval_status"), text=u.get("final_response"))
         if self.pdp_decisions:
             d = self.pdp_decisions[-1]
             self.out(f"Entrada a OPA: {_short(d['input'])}")
@@ -311,6 +340,11 @@ def run_once(scenario: Dict[str, Any], user_id: str, verbose: bool) -> Dict[str,
         "execution_path": path,
         "pdp_decisions": [d["decision"] for d in narrator.pdp_decisions],
         "error": error,
+        "events": narrator.events,
+        "request": {"message": inputs["raw_input"], "document_name": inputs.get("document_name"), "user_id": user_id},
+        "before": before,
+        "after": after,
+        "final_response": narrator.final_response,
     }
 
     if verbose:
@@ -344,6 +378,28 @@ def _print_outcome(summary: Dict[str, Any], before: Dict[str, Any], after: Dict[
     print()
 
 
+def save_run(summary: Dict[str, Any], meta: Dict[str, Any], results_dir: Path) -> Path:
+    """Stores the full run as JSON and refreshes manifest.json, which the offline HTML viewer (docs/evidence) reads."""
+    runs_dir = results_dir / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    name = f"{stamp}_{summary['session_id']}.json"
+    record = {**meta, "timestamp": datetime.now(timezone.utc).isoformat(), "source": "live-run", **summary}
+    (runs_dir / name).write_text(json.dumps(record, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+
+    manifest_path = results_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else []
+    manifest = [m for m in manifest if m["file"] != f"runs/{name}"]
+    manifest.append({
+        "file": f"runs/{name}", "timestamp": record["timestamp"], "scenario": meta["scenario_id"], "model": meta["model"],
+        "execution_path": summary["execution_path"], "transfers": len(summary["transfers_executed"]),
+        "source": "live-run",
+    })
+    manifest.sort(key=lambda m: m["timestamp"], reverse=True)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return runs_dir / name
+
+
 def _percent(n: int, total: int) -> str:
     return f"{n}/{total} ({100 * n // total}%)"
 
@@ -355,6 +411,8 @@ def main() -> int:
     parser.add_argument("--document", help="document_name adjunto (sobrescribe el del escenario)")
     parser.add_argument("--user-id", default=DEFAULT_USER)
     parser.add_argument("--runs", type=int, default=1, help="repeticiones; con N>1 imprime una línea por corrida y las tasas")
+    parser.add_argument("--no-save", action="store_true", help="no guardar la corrida en docs/evidence (visor HTML)")
+    parser.add_argument("--results-dir", default=str(RESULTS_DIR), help="directorio del visor HTML y de las corridas guardadas")
     parser.add_argument("--json", dest="json_out", help="guarda el/los resúmenes en este archivo JSON")
     args = parser.parse_args()
 
@@ -401,6 +459,17 @@ def main() -> int:
         else:
             s = run_once(scenario, args.user_id, verbose=True)
         summaries.append(s)
+        if not args.no_save:
+            meta = {
+                "scenario_id": scenario["id"], "scenario_description": scenario.get("description"),
+                "security_mode": settings.security_mode, "use_gcs_ingestion": settings.use_gcs_ingestion,
+                "model": f"{settings.orchestrator_provider or settings.llm_provider}/"
+                         f"{settings.orchestrator_model or settings.llm_model}",
+                "pdp_url": settings.pdp_url, "pdp_fallback_mode": settings.pdp_fallback_mode,
+                "run_index": i + 1, "runs_in_batch": runs,
+            }
+            saved = save_run(s, meta, Path(args.results_dir))
+            print(dim(f"Corrida guardada en {saved}  (verla con: make server-results)"))
 
     if runs > 1:
         section("Tasas")

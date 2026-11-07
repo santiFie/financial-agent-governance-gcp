@@ -6,7 +6,7 @@
 
 DOCKER_COMPOSE ?= docker compose
 
-.PHONY: help up-dev up-prod down logs ps test restart-dev restart-prod opa-up attack attack-n
+.PHONY: help up-dev up-prod down logs ps test restart-dev restart-prod opa-up attack attack-n server-results
 
 PYTHON ?= $(shell [ -x backend/.venv/bin/python ] && echo backend/.venv/bin/python || echo python3)
 N ?= 5
@@ -23,6 +23,7 @@ help:
 	@echo "  make opa-up       Levanta solo la política OPA (PDP) en localhost:8181"
 	@echo "  make attack       Ejecuta y narra el escenario 3.1 (LLM real; levanta OPA)"
 	@echo "  make attack-n N=5 Repite el escenario N veces y reporta tasas"
+	@echo "  make server-results  Abre el visor HTML de corridas guardadas (sin LLM ni Docker)"
 	@echo "  make restart-dev  Reinicia el entorno local de desarrollo"
 	@echo "  make restart-prod Reinicia el entorno de producción"
 	@echo ""
@@ -85,6 +86,11 @@ attack: opa-up
 
 attack-n: opa-up
 	$(PYTHON) scripts/demo_attack.py --runs $(N) $(ARGS)
+
+# Visor offline de las corridas guardadas en docs/evidence (no requiere LLM). RESULTS_PORT=8765 por defecto.
+RESULTS_PORT ?= 8765
+server-results:
+	python3 scripts/serve_results.py --port $(RESULTS_PORT)
 
 restart-dev: down up-dev
 

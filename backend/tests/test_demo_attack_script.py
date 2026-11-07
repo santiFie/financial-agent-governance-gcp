@@ -52,3 +52,20 @@ def test_events_are_numbered_chronologically_and_pep_noop_is_skipped(capsys):
     assert "2. action_agent [paso 1]" in out
     assert "3. readonly_agent [paso 2]" in out
     assert "pep_node" not in out
+
+
+def test_save_run_writes_full_record_and_updates_manifest(tmp_path):
+    import json
+
+    demo = _load()
+    summary = {"session_id": "sess_x", "execution_path": "FAST_PATH", "transfers_executed": [{"amount": 1}],
+               "events": [{"kind": "result", "title": "t", "node": "n", "text": "x" * 5000}]}
+    meta = {"scenario_id": "sc", "model": "p/m"}
+
+    path = demo.save_run(summary, meta, tmp_path)
+    demo.save_run({**summary, "session_id": "sess_y"}, meta, tmp_path)
+
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert len(record["events"][0]["text"]) == 5000  # nothing truncated
+    manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    assert len(manifest) == 2 and manifest[0]["execution_path"] == "FAST_PATH"
