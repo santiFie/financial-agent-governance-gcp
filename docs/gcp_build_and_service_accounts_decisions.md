@@ -1,6 +1,6 @@
 # Decisiones de Arquitectura GCP: Cloud Build, IAM y Almacenamiento
 
-Este documento complementa a [`docs/gcp_deployment_and_iam.md`](file:///home/santi/Documentos/Curso%20Ciberseguridad/gcp-projects/financial_asistent/docs/gcp_deployment_and_iam.md). Detalla las decisiones técnicas, de ciberseguridad y de configuración adoptadas durante la creación de la base de datos Firestore, el repositorio en Artifact Registry, la resolución de errores en Cloud Build y el desacoplamiento de Service Accounts entre tiempo de compilación (*Build time*) y tiempo de ejecución (*Runtime*).
+Este documento complementa a [`docs/gcp_deployment_and_iam.md`](gcp_deployment_and_iam.md). Detalla las decisiones técnicas, de ciberseguridad y de configuración adoptadas durante la creación de la base de datos Firestore, el repositorio en Artifact Registry, la resolución de errores en Cloud Build y el desacoplamiento de Service Accounts entre tiempo de compilación (*Build time*) y tiempo de ejecución (*Runtime*).
 
 ---
 
@@ -42,7 +42,7 @@ Al crear el repositorio para alojar las imágenes Docker se evaluaron los cuatro
 
 ## 3. Arquitectura de Service Accounts: Build Time vs. Runtime
 
-En [`docs/gcp_deployment_and_iam.md`](file:///home/santi/Documentos/Curso%20Ciberseguridad/gcp-projects/financial_asistent/docs/gcp_deployment_and_iam.md) se definió la cuenta de **Runtime** (`sa-financial-assistant`). Para las tareas de compilación y despliegue se adoptó una cuenta dedicada de **Build/CI-CD**.
+En [`docs/gcp_deployment_and_iam.md`](gcp_deployment_and_iam.md) se definió la cuenta de **Runtime** (`sa-financial-assistant`). Para las tareas de compilación y despliegue se adoptó una cuenta dedicada de **Build/CI-CD**.
 
 ```mermaid
 flowchart TD
@@ -110,6 +110,8 @@ Se especificó la bandera `--default-buckets-behavior=regional-user-owned-bucket
 
 ## 5. Higiene del Contexto de Compilación (`.gcloudignore`)
 
+> **Actualización:** el build ahora usa la **raíz del repositorio** como contexto (`deploy/cloudbuild-backend.yaml`, `backend/Dockerfile`) porque la imagen incluye `mcp_financial_action_server` y `backend/local_storage`. Por eso el `.gcloudignore` que cuenta debe estar en la raíz del repo (`gcloud builds submit .`); el de `backend/` descrito abajo corresponde al contexto anterior (`gcloud builds submit backend`).
+
 Durante la primera ejecución, Cloud Build intentó subir **18.333 archivos (630.3 MiB)**.
 
 ### Causa Técnica
@@ -121,7 +123,7 @@ Durante la primera ejecución, Cloud Build intentó subir **18.333 archivos (630
 * **Fuga de secretos:** Riesgo de empaquetar archivos `.env` locales con API keys de prueba.
 * **Sobrecarga de red:** Tiempos de transferencia excesivos.
 
-Al incorporar [`backend/.gcloudignore`](file:///home/santi/Documentos/Curso%20Ciberseguridad/gcp-projects/financial_asistent/backend/.gcloudignore), el paquete se redujo a **32 archivos y 71.8 KiB** (reducción del 99.98%).
+Al incorporar [`backend/.gcloudignore`](../backend/.gcloudignore), el paquete se redujo a **32 archivos y 71.8 KiB** (reducción del 99.98%).
 
 ---
 

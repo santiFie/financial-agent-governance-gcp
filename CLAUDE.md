@@ -86,7 +86,7 @@ Mutations and reads go through `MCPActionClient`, which imports the tool functio
 
 ### Cross-cutting
 - `app/config.py` (pydantic-settings, reads `.env`) holds the key switches. `SECURITY_MODE` is `local_mock` or `gcp_live`. `LLM_PROVIDER` defaults to `litellm`, which falls back groq → nvidia → vertexai → openrouter; it can also be set to a single provider. `CHECKPOINTER_TYPE` is `memory` or `firestore`. There are also flags for GCS document ingestion and GCP Model Armor.
-- `core/llm.py` `get_chat_model()` is the only LLM factory. It returns `None` when credentials are missing, and nodes must handle that.
+- `core/llm.py` `get_chat_model()` is the only LLM factory. It raises `LLMConfigurationError` when no provider has valid credentials, so nodes must build the LLM lazily (inside the node function), never at import time.
 - Prompts are YAML files in `app/prompts/`, loaded and validated by `core/prompt_manager.py` (each declares `name`, `version`, `required_variables`, `system_template`). Reference them by `name`, not by filename. `tests/test_prompts.py` validates them.
 - Tracing uses LangSmith through `core/telemetry.py` (`build_trace_config`).
 - Deployment targets Cloud Run (`deploy/`, `docs/gcp_deployment_and_iam.md`). Design rationale is in `docs/architecture.md` and `docs/governance_and_security.md`.

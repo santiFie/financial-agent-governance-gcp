@@ -9,7 +9,11 @@ Servidor MCP construido con **FastMCP** para gestionar y ejecutar operaciones ba
 | `execute_bank_transfer` | `user_id`, `source_account_id`, `destination_cbu_or_alias`, `amount`, `currency`, `concept`, `idempotency_key` | `destructiveHint: true`, `idempotentHint: true`, `readOnlyHint: false` | Realiza transferencias bancarias debitando fondos de forma atómica y emitiendo comprobante. Valida CBU/Alias, solvencia, límite diario e idempotencia. |
 | `register_destination_account` | `user_id`, `cbu_or_cvu`, `alias`, `holder_name`, `bank_name` | `destructiveHint: false`, `idempotentHint: true`, `readOnlyHint: false` | Da de alta un nuevo CBU/CVU o Alias en la agenda de destinatarios del cliente. |
 | `schedule_direct_debit` | `user_id`, `account_id`, `service_provider`, `customer_reference`, `max_amount`, `frequency` | `destructiveHint: false`, `idempotentHint: false`, `readOnlyHint: false` | Programa un débito automático periódico contra la cuenta seleccionada. |
+| `get_account_balances` | `user_id` | `readOnlyHint: true` | Saldos del usuario (reflejan transferencias ejecutadas). |
+| `get_recent_transactions` | `user_id`, `limit` | `readOnlyHint: true` | Últimos movimientos del usuario. |
 | `cancel_scheduled_debit` | `user_id`, `debit_id` | `destructiveHint: true`, `idempotentHint: true`, `readOnlyHint: false` | Da de baja una adhesión a débito automático previamente programada. |
+
+> El backend **no** llama a este servidor por HTTP: `MCPActionClient` (`backend/app/core/mcp_action_client.py`) importa las funciones de `server.py` in-process. El servicio HTTP de `docker-compose` (puerto 8001) expone las mismas tools por protocolo MCP.
 
 ## 🛡️ Reglas y Validaciones de Seguridad
 1. **Validación de CBU/CVU**: Requiere exactamente 22 dígitos numéricos conforme al estándar BCRA.

@@ -1,6 +1,6 @@
 # Despliegue en Google Cloud Platform (GCP) y Guía de Aprendizaje IAM
 
-Esta guía explica cómo desplegar **AegisBank AI** en GCP maximizando la preservación del crédito inicial de $300 USD y detalla el ejercicio práctico de configuración de **IAM bajo el Principio de Menor Privilegio (Least Privilege)**. Para consultar las decisiones sobre Firestore, Artifact Registry, cuentas de servicio de CI/CD (`sa-cloud-build`) y resolución de incidencias en Cloud Build, consulta [`docs/gcp_build_and_service_accounts_decisions.md`](file:///home/santi/Documentos/Curso%20Ciberseguridad/gcp-projects/financial_asistent/docs/gcp_build_and_service_accounts_decisions.md).
+Esta guía explica cómo desplegar **AegisBank AI** en GCP maximizando la preservación del crédito inicial de $300 USD y detalla el ejercicio práctico de configuración de **IAM bajo el Principio de Menor Privilegio (Least Privilege)**. Para consultar las decisiones sobre Firestore, Artifact Registry, cuentas de servicio de CI/CD (`sa-cloud-build`) y resolución de incidencias en Cloud Build, consulta [`docs/gcp_build_and_service_accounts_decisions.md`](gcp_build_and_service_accounts_decisions.md).
 
 ---
 
@@ -21,7 +21,7 @@ Para operar este proyecto sin consumir de forma prematura tus $300 de crédito, 
 ## 2. Ejercicio Práctico: Configuración de IAM (Least Privilege)
 
 > [!NOTE]
-> Este módulo está reservado para ser completado por ti en el archivo [`deploy/iam-setup.sh`](file:///home/santi/Documentos/Curso%20Ciberseguridad/gcp-projects/financial_asistent/deploy/iam-setup.sh), permitiéndote afianzar las competencias de gobernanza y seguridad en agentes de IA.
+> Este módulo está reservado para ser completado por ti en el archivo [`deploy/iam-setup.sh`](../deploy/iam-setup.sh), permitiéndote afianzar las competencias de gobernanza y seguridad en agentes de IA.
 
 ### ¿Por qué NO usar la Service Account por defecto de Compute Engine?
 Por defecto, Cloud Run puede ejecutarse con la Service Account `[PROJECT_NUMBER]-compute@developer.gserviceaccount.com`, la cual posee el rol **Editor** a nivel de proyecto. Si un atacante comprometiera el contenedor o lograra ejecución remota, tendría control total sobre el proyecto GCP.
@@ -123,3 +123,10 @@ gcloud logging read "resource.type=cloud_run_revision AND resource.labels.servic
   --limit 30 \
   --format "table(timestamp, textPayload)"
 ```
+
+
+## Nota: política OPA (PDP) en el despliegue
+
+El `pep_node` consulta la política OPA en `PDP_URL` (en `docker-compose.yml` apunta al servicio `opa`). `deploy/cloudrun-service.yaml` **todavía no despliega OPA ni define `PDP_URL`**: sin PDP accesible se aplica `PDP_FALLBACK_MODE` (por defecto `deny`) y cada transferencia termina `FAILED`. Para un despliegue funcional hay que publicar OPA (p. ej. un segundo servicio de Cloud Run con `policies/`) y configurar `PDP_URL`, o usar `PDP_FALLBACK_MODE=hitl`. El despliegue en GCP no forma parte de la demo local de la PoC.
+
+Además, `CHECKPOINTER_TYPE=firestore` hoy usa igualmente `MemorySaver` (ver `docs/architecture.md`, sección 4).

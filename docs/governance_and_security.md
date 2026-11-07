@@ -53,8 +53,8 @@ Al desplegar agentes con acceso a bases de datos y funciones transaccionales, su
 - **Riesgo:** El LLM tiene acceso directo a una herramienta de débito bancario y la ejecuta de forma autónoma sin verificación externa.
 - **Mitigación en AegisBank:**
   1. **Separación de Agentes:** El **Read-Only DB Agent** no posee ninguna herramienta de escritura.
-  2. **Encolado sin Ejecución:** El **Action Agent** solo posee la herramienta `stage_transfer_request`, que encola la transferencia con estado `PENDING_APPROVAL`, pero no realiza el débito financiero.
-  3. **Human-in-the-Loop Nativo:** El grafo LangGraph se interrumpe obligatoriamente con `interrupt()`. Se requiere la acción manual de un operador humano a través del endpoint `/api/approve` para efectuar el débito real.
+  2. **Encolado sin Ejecución:** El **Action Agent** posee `register_recipient_tool` (alta en la agenda de destinatarios) y `transfer_funds_tool`, que solo **encola** la transferencia en `pending_tool_calls`; nunca realiza el débito. Toda transferencia pasa por el `pep_node`.
+  3. **Policy Enforcement Point + HITL:** el `pep_node` consulta la política OPA. Una transferencia a un destinatario confiable por menos de 50.000 ARS sale por **Fast-Path** (sin intervención humana); el resto interrumpe el grafo con `interrupt()` y requiere aprobación vía `/api/approve`. Si OPA no responde, `PDP_FALLBACK_MODE` decide (`deny` o `hitl`).
 
 ---
 
@@ -75,9 +75,9 @@ sequenceDiagram
     Usuario->>Sanitizer: "Transferir $10.000 al CBU 0170099900000012345678"
     Sanitizer->>Vault: Guarda [CBU_BANCARIO_1] = 0170099900000012345678
     Sanitizer->>LLM: "Transferir $10.000 al CBU [CBU_BANCARIO_1]" (PII Oculta)
-    LLM-->>Sanitizer: Intención: Encolar transferencia a [CBU_BANCARIO_1]
-    Sanitizer->>CoreDB: Encola transacción en PENDING_APPROVAL
-    Note over Sanitizer,CoreDB: Grafo Pausado (interrupt)
+    LLM-->>Sanitizer: Plan: action_agent transfiere a [CBU_BANCARIO_1]
+    Sanitizer->>CoreDB: action_agent encola; pep_node consulta OPA
+    Note over Sanitizer,CoreDB: Fast-Path (confiable y < 50.000 ARS) ejecuta directo. Si no: HITL, grafo pausado (interrupt)
     HITL->>CoreDB: Aprueba transacción en Portal (/api/approve)
     CoreDB->>Vault: Resuelve [CBU_BANCARIO_1] ➔ CBU Real
     CoreDB->>CoreDB: Ejecuta débito atómico de fondos
@@ -92,4 +92,4 @@ Cada interacción en AegisBank AI genera metadatos de auditoría accesibles tant
 - **`defense_action`:** `PASSED`, `DEIDENTIFIED` o `BLOCKED`.
 - **`pii_detected`:** Detalle de InfoTypes identificados por Cloud DLP.
 - **`processing_time_ms`:** Latencia agregada por las capas de seguridad (típicamente < 15ms en modo local y < 120ms con Cloud DLP).
-- **`approved_by`:** Identificador del oficial de cumplimiento que autorizó la operación en el portal HITL.
+- **`trace_id`:** Identificador de la traza (LangSmith) de la interacción.

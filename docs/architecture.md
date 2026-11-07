@@ -58,13 +58,13 @@ El flujo conversacional se modela como un grafo de estado dirigido usando **Lang
 ### 2.4. Nodo `action_agent` y `pep_node`
 - **Tipo:** Agente ReAct transaccional + Policy Enforcement Point.
 - **Herramientas del `action_agent`:** `register_recipient_tool` (alta en la agenda de destinatarios, se ejecuta directamente) y `transfer_funds_tool`, que **solo encola** la solicitud: el agente la deja en `pending_tool_calls`/`pending_transfer` y nunca mueve fondos.
-- **`pep_node`:** verifica si el destinatario es confiable, consulta al PDP (`settings.pdp_url`; con fallback local: destinatario confiable y monto < 50.000 ARS → Fast-Path, caso contrario HITL) y completa el paso. Fast-Path debita directamente; HITL llama a `interrupt()` y se reanuda con `POST /api/approve` (`Command(resume=...)`).
+- **`pep_node`:** verifica si el destinatario es confiable, consulta al PDP (`settings.pdp_url`, política OPA: destinatario confiable y monto < 50.000 ARS → Fast-Path, caso contrario HITL). Si el PDP no responde, `settings.pdp_fallback_mode` decide: `deny` (por defecto, la transferencia termina `FAILED`) o `hitl` (todo pasa a aprobación humana); nunca Fast-Path y completa el paso. Fast-Path debita directamente; HITL llama a `interrupt()` y se reanuda con `POST /api/approve` (`Command(resume=...)`).
 
 ---
 
 ## 3. Estado del Grafo (`AgentState`)
 
-El estado compartido a lo largo de las transiciones del grafo está fuertemente tipado en [`app/graph/state.py`](file:///home/santi/Documentos/Curso%20Ciberseguridad/gcp-projects/financial_asistent/backend/app/graph/state.py):
+El estado compartido a lo largo de las transiciones del grafo está fuertemente tipado en [`app/graph/state.py`](../backend/app/graph/state.py):
 
 | Campo | Tipo | Propósito |
 | :--- | :--- | :--- |
@@ -89,6 +89,6 @@ El estado compartido a lo largo de las transiciones del grafo está fuertemente 
 Para garantizar que las conversaciones y los puntos de interrupción (`interrupt`) puedan pausarse y reanudarse en arquitecturas sin estado (Serverless / Cloud Run), se implementa un Checkpointer:
 
 - **Modo Desarrollo / Local:** `MemorySaver`, que almacena los checkpoints en la memoria del proceso, ideal para testing unitario y ejecución sin dependencias de infraestructura.
-- **Modo Producción en GCP:** **Cloud Firestore (Native Mode)**.
+- **Modo Producción en GCP (previsto, no implementado):** **Cloud Firestore (Native Mode)**. Hoy `get_checkpointer()` (`app/db/checkpointer.py`) devuelve `MemorySaver` también con `CHECKPOINTER_TYPE=firestore`; el estado no sobrevive a reinicios del proceso.
   - **Ventaja de Costo:** Firestore tiene un nivel gratuito permanente (1 GB y 50.000 lecturas/día), permitiendo operar el asistente sin gastar el crédito de $300 en instancias activas como Cloud SQL.
   - **Cifrado en Reposo:** Todos los datos en Firestore están encriptados por defecto con llaves administradas por Google (CMEK o Google-managed keys).
