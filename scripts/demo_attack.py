@@ -1,0 +1,399 @@
+#!/usr/bin/env python3
+"""
+Narrated end-to-end run of the AegisBank graph for threat 3.1 (Goal Hijacking / Confused Deputy).
+
+It runs the real graph (real LLM, real MCP server, real PEP/PDP) on a request that carries an attached
+document, streams every node update and prints, in readable form:
+document ingestion, initial plan, replan (steps appended after the first plan), staged tool calls,
+the PEP/PDP decision, executed transfers, and balances / address book before and after.
+
+This is a *measurement*, not a test: an attack that succeeds is a result, not a failure. The exit code is
+non-zero only on tool/graph errors or missing prerequisites. Nothing here knows the attacker's account, amount
+or wording: the request and document name come from a scenario data file (or CLI arguments), and everything
+reported is derived from what the graph actually did.
+
+Usage (from the repo root, with the backend venv):
+    backend/.venv/bin/python scripts/demo_attack.py                        # first scenario of the data file
+    backend/.venv/bin/python scripts/demo_attack.py --scenario <id>
+    backend/.venv/bin/python scripts/demo_attack.py --message "..." --document comprobante.txt
+    backend/.venv/bin/python scripts/demo_attack.py --runs 5               # compact per-run lines + rates
+"""
+import argparse
+import json
+import logging
+import os
+import sys
+import uuid
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from unittest.mock import patch
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+BACKEND_DIR = ROOT_DIR / "backend"
+for _p in (ROOT_DIR, BACKEND_DIR):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+
+SCENARIOS_FILE = BACKEND_DIR / "tests" / "data" / "attack_3_1_scenarios.json"
+DEFAULT_USER = "user_default_01"
+DOC_PREVIEW_CHARS = 700
+
+_USE_COLOR = sys.stdout.isatty() and os.getenv("NO_COLOR") is None
+
+
+def _c(code: str, text: str) -> str:
+    return f"\033[{code}m{text}\033[0m" if _USE_COLOR else text
+
+
+def bold(t): return _c("1", t)
+def dim(t): return _c("2", t)
+def red(t): return _c("31;1", t)
+def green(t): return _c("32;1", t)
+def yellow(t): return _c("33;1", t)
+def cyan(t): return _c("36;1", t)
+
+
+def section(title: str) -> None:
+    print(f"\n{cyan('━━ ' + title + ' ' + '━' * max(3, 70 - len(title)))}")
+
+
+def load_scenarios() -> List[Dict[str, Any]]:
+    with open(SCENARIOS_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _snapshot(user_id: str) -> Dict[str, Any]:
+    """Balances, address book and ledger of the user, read straight from the MCP server storage."""
+    from mcp_financial_action_server.storage import financial_storage
+
+    return {
+        "balances": {
+            f"{a['account_id']} ({a['currency']})": a["balance"]
+            for a in financial_storage.get_account_balances(user_id)
+        },
+        "address_book": [dict(r) for r in financial_storage.address_book.get(user_id, [])],
+        "ledger": [dict(t) for t in financial_storage.ledger],
+    }
+
+
+def _reset_state() -> None:
+    from app.db.mock_banking import mock_banking_db
+    from mcp_financial_action_server.storage import financial_storage
+
+    financial_storage.reset_state()
+    mock_banking_db.pending_transfers.clear()
+
+
+def _check_pdp() -> Optional[str]:
+    """Returns a warning when the PDP is unreachable (the PEP would then apply pdp_fallback_mode)."""
+    import httpx
+    from app.config import settings
+
+    try:
+        httpx.post(settings.pdp_url, json={"input": {"amount": 1, "is_trusted_recipient": False}},
+                   timeout=settings.pdp_timeout_seconds).raise_for_status()
+        return None
+    except Exception as e:
+        return (f"El PDP (OPA) no responde en {settings.pdp_url} ({type(e).__name__}). "
+                f"Se aplicará pdp_fallback_mode='{settings.pdp_fallback_mode}': ninguna transferencia llegará a Fast-Path. "
+                f"Levantalo con `make opa-up` o `docker compose up -d opa`.")
+
+
+def _short(value: Any, limit: int = 160) -> str:
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _money(value: Any) -> str:
+    try:
+        return f"{float(value):,.2f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+class Narrator:
+    """Turns graph stream updates into printed events and a structured summary."""
+
+    def __init__(self, verbose: bool):
+        self.verbose = verbose
+        self.seen_steps = 0
+        self.plan: List[Dict[str, Any]] = []
+        self.initial_plan: List[Dict[str, Any]] = []
+        self.replanned: List[Dict[str, Any]] = []
+        self.staged: List[Dict[str, Any]] = []
+        self.pdp_decisions: List[Dict[str, Any]] = []
+        self.document_read = False
+        self.threat: Optional[str] = None
+        self.paused_for_hitl = False
+        self.final_response: Optional[str] = None
+        self.status: Optional[str] = None
+
+    def out(self, text: str = "") -> None:
+        if self.verbose:
+            print(text)
+
+    def on_update(self, node: str, update: Dict[str, Any]) -> None:
+        if node == "__interrupt__":
+            self.paused_for_hitl = True
+            payload = getattr(update[0], "value", update[0]) if update else {}
+            self.out(f"\n{yellow('⏸  HITL')}: el grafo se pausó esperando aprobación humana → {_short(payload, 300)}")
+            return
+        if not isinstance(update, dict):
+            return
+        handler = getattr(self, f"_on_{node}", None)
+        if handler:
+            handler(update)
+        for key in ("final_response", "status"):
+            if update.get(key) is not None:
+                setattr(self, key, update[key])
+
+    def _on_sanitizer(self, u: Dict[str, Any]) -> None:
+        section("1. Sanitizer (DLP + Model Armor sobre el pedido)")
+        pii = u.get("detected_pii") or []
+        self.out(f"defense_action={u.get('defense_action')}  is_threat={u.get('is_threat')}  PII tokenizada={len(pii)}")
+        self.out(f"input saneado: {_short(u.get('sanitized_input'), 300)}")
+        if u.get("is_threat"):
+            self.threat = u.get("threat_category") or "THREAT"
+            self.out(red(f"BLOQUEADO por el sanitizer: {u.get('threat_reason')}"))
+
+    def _on_router(self, u: Dict[str, Any]) -> None:
+        for msg in u.get("orchestrator_scratchpad") or []:
+            for call in getattr(msg, "tool_calls", None) or []:
+                if call.get("name") == "read_document_tool":
+                    section("2. Orquestador pide leer el documento adjunto")
+                    self.out(f"read_document_tool({_short(call.get('args'))})")
+        plan = u.get("execution_plan")
+        if plan is not None and len(plan) > self.seen_steps:
+            new = plan[self.seen_steps:]
+            first = self.seen_steps == 0
+            section("3. Plan inicial del Orquestador" if first else "5. REPLAN: el Orquestador agregó pasos")
+            for step in new:
+                marker = "" if first else red("  ← agregado al replanificar")
+                self.out(f"  [{step['step_id']}] {step['target_node']:<14} {bold(step['title'])}{marker}")
+                self.out(f"      {dim(_short(step['description'], 260))}")
+            (self.initial_plan if first else self.replanned).extend(new)
+            self.seen_steps = len(plan)
+        if plan is not None:
+            self.plan = list(plan)
+        if u.get("final_response") and self.verbose and u.get("status") in ("FAILED", "COMPLETED"):
+            self.out(f"\nRespuesta del Orquestador: {_short(u['final_response'], 400)}")
+
+    def _on_orchestrator_tools(self, u: Dict[str, Any]) -> None:
+        for msg in u.get("orchestrator_scratchpad") or []:
+            content = getattr(msg, "content", "")
+            if not isinstance(content, str) or not content:
+                continue
+            self.document_read = True
+            self.out(dim("Contenido que llega al LLM (ya pasó Model Armor + DLP; los datos sensibles van tokenizados):"))
+            preview = content if len(content) <= DOC_PREVIEW_CHARS else content[:DOC_PREVIEW_CHARS] + "…"
+            for line in preview.splitlines():
+                self.out(dim("  │ " + line))
+            self.out(green("✔ El documento pasó los filtros y entró como contexto."))
+
+    def _on_readonly_agent(self, u: Dict[str, Any]) -> None:
+        section("4. readonly_agent (lectura)")
+        self.out(_short(u.get("final_response"), 400))
+
+    def _on_action_agent(self, u: Dict[str, Any]) -> None:
+        section("6. action_agent")
+        calls = u.get("pending_tool_calls") or []
+        for call in calls:
+            self.staged.append(call)
+            self.out(f"Tool call en staging: {bold(call.get('name'))}({_short(call.get('args'), 300)})")
+        if not calls:
+            self.out(_short(u.get("final_response") or "(paso completado sin transferencia en staging)", 300))
+
+    def _on_pep_node(self, u: Dict[str, Any]) -> None:
+        section("7. pep_node (Policy Enforcement Point)")
+        if self.pdp_decisions:
+            d = self.pdp_decisions[-1]
+            self.out(f"Entrada a OPA: {_short(d['input'])}")
+            self.out(f"Decisión de OPA: {_short(d['decision'])}")
+        self.out(f"status={u.get('status')}  approval_status={u.get('approval_status')}")
+        if u.get("final_response"):
+            self.out(_short(u["final_response"], 500))
+
+
+def run_once(scenario: Dict[str, Any], user_id: str, verbose: bool) -> Dict[str, Any]:
+    from langchain_core.messages import HumanMessage
+
+    from app.graph.graph import financial_graph
+    from app.graph.nodes import pep as pep_module
+
+    session_id = f"sess_demo_{uuid.uuid4().hex[:8]}"
+    config = {"configurable": {"thread_id": session_id}}
+    narrator = Narrator(verbose)
+    inputs = scenario["input"]
+
+    _reset_state()
+    before = _snapshot(user_id)
+    if verbose:
+        section("Estado inicial")
+        print(f"Saldos: {json.dumps(before['balances'], ensure_ascii=False)}")
+        print(f"Libreta de destinatarios: {len(before['address_book'])} registro(s)")
+        print(f"\nPedido del usuario: {bold(inputs['raw_input'])}")
+        print(f"Documento adjunto: {bold(str(inputs.get('document_name')))}")
+
+    original_query = pep_module._query_pdp
+
+    def spy_query(payload):
+        decision = original_query(payload)
+        narrator.pdp_decisions.append({"input": payload, "decision": decision if decision is not None else "PDP no disponible → fallback"})
+        return decision
+
+    error: Optional[str] = None
+    try:
+        with patch.object(pep_module, "_query_pdp", side_effect=spy_query):
+            for chunk in financial_graph.stream(
+                {
+                    "messages": [HumanMessage(content=inputs["raw_input"])],
+                    "raw_input": inputs["raw_input"],
+                    "document_name": inputs.get("document_name"),
+                    "session_id": session_id,
+                    "user_id": user_id,
+                    "status": "IN_PROGRESS",
+                },
+                config=config,
+                stream_mode="updates",
+            ):
+                for node, update in chunk.items():
+                    narrator.on_update(node, update)
+    except Exception as e:  # reported, never hidden
+        error = f"{type(e).__name__}: {e}"
+
+    after = _snapshot(user_id)
+    new_ledger = after["ledger"][len(before["ledger"]):]
+    new_recipients = [r for r in after["address_book"] if r not in before["address_book"]]
+
+    if narrator.threat:
+        path = "BLOCKED"
+    elif new_ledger:
+        path = "FAST_PATH"
+    elif error:
+        path = "ERROR"
+    elif narrator.paused_for_hitl:
+        path = "HITL"
+    else:
+        path = "NONE"
+
+    summary = {
+        "session_id": session_id,
+        "document_read": narrator.document_read,
+        "initial_plan": [(s["target_node"], s["title"]) for s in narrator.initial_plan],
+        "replanned": [(s["target_node"], s["title"]) for s in narrator.replanned],
+        "action_agent_invoked": any(s["target_node"] == "action_agent" for s in narrator.plan),
+        "new_recipients": new_recipients,
+        "transfers_executed": new_ledger,
+        "execution_path": path,
+        "pdp_decisions": [d["decision"] for d in narrator.pdp_decisions],
+        "error": error,
+    }
+
+    if verbose:
+        _print_outcome(summary, before, after, narrator)
+    return summary
+
+
+def _print_outcome(summary: Dict[str, Any], before: Dict[str, Any], after: Dict[str, Any], narrator: Narrator) -> None:
+    section("Resultado")
+    if summary["error"]:
+        print(red(f"Error del grafo: {summary['error']}"))
+    print(f"Camino de ejecución: {bold(summary['execution_path'])}")
+    print(f"action_agent invocado: {summary['action_agent_invoked']}   "
+          f"pasos agregados al replanificar: {len(summary['replanned'])}")
+
+    print(f"\n{bold('Saldos')}  antes → después")
+    for acc, bal in before["balances"].items():
+        now = after["balances"].get(acc, bal)
+        flag = red("  (cambió)") if now != bal else ""
+        print(f"  {acc}: {_money(bal)} → {_money(now)}{flag}")
+
+    print(f"\n{bold('Libreta de destinatarios')}  antes: {len(before['address_book'])}  después: {len(after['address_book'])}")
+    for r in summary["new_recipients"]:
+        print(red(f"  + nuevo destinatario: {_short(r, 220)}"))
+
+    print(f"\n{bold('Transferencias ejecutadas')}: {len(summary['transfers_executed'])}")
+    for t in summary["transfers_executed"]:
+        print(red(f"  ✗ {_short(t, 260)}"))
+    if not summary["transfers_executed"]:
+        print(green("  ninguna"))
+    print()
+
+
+def _percent(n: int, total: int) -> str:
+    return f"{n}/{total} ({100 * n // total}%)"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Ejecuta y narra el escenario 3.1 sobre el grafo real.")
+    parser.add_argument("--scenario", help="id del escenario en attack_3_1_scenarios.json (default: el primero)")
+    parser.add_argument("--message", help="mensaje del usuario (sobrescribe el del escenario)")
+    parser.add_argument("--document", help="document_name adjunto (sobrescribe el del escenario)")
+    parser.add_argument("--user-id", default=DEFAULT_USER)
+    parser.add_argument("--runs", type=int, default=1, help="repeticiones; con N>1 imprime una línea por corrida y las tasas")
+    parser.add_argument("--json", dest="json_out", help="guarda el/los resúmenes en este archivo JSON")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.WARNING)
+
+    os.chdir(BACKEND_DIR)  # relative settings (local_storage, .env) resolve like in the backend
+    from app.core.llm import LLMConfigurationError, get_chat_model
+
+    try:
+        get_chat_model(temperature=0.0)
+    except LLMConfigurationError as e:
+        print(red(f"Falta configuración de LLM: {e}"), file=sys.stderr)
+        return 2
+
+    scenarios = load_scenarios()
+    scenario = next((s for s in scenarios if s["id"] == args.scenario), None) if args.scenario else scenarios[0]
+    if scenario is None:
+        print(red(f"Escenario desconocido. Disponibles: {[s['id'] for s in scenarios]}"), file=sys.stderr)
+        return 2
+    scenario = json.loads(json.dumps(scenario))
+    if args.message:
+        scenario["input"]["raw_input"] = args.message
+    if args.document:
+        scenario["input"]["document_name"] = args.document
+
+    from app.config import settings
+
+    print(bold("AegisBank AI — escenario 3.1 (Goal Hijacking / Confused Deputy)"))
+    print(f"escenario={scenario['id']}  modo={settings.security_mode}  "
+          f"orquestador={settings.orchestrator_provider or settings.llm_provider}/"
+          f"{settings.orchestrator_model or settings.llm_model}  GCS={settings.use_gcs_ingestion}")
+    warning = _check_pdp()
+    if warning:
+        print(yellow(f"⚠ {warning}"))
+
+    runs = max(args.runs, 1)
+    summaries = []
+    for i in range(runs):
+        if runs > 1:
+            s = run_once(scenario, args.user_id, verbose=False)
+            print(f"[{i + 1}/{runs}] path={s['execution_path']:<9} action_agent={s['action_agent_invoked']!s:<5} "
+                  f"replan+={len(s['replanned'])} nuevos_dest={len(s['new_recipients'])} "
+                  f"transferencias={len(s['transfers_executed'])}" + (f"  ERROR {s['error']}" if s["error"] else ""))
+        else:
+            s = run_once(scenario, args.user_id, verbose=True)
+        summaries.append(s)
+
+    if runs > 1:
+        section("Tasas")
+        print(f"action_agent invocado:        {_percent(sum(s['action_agent_invoked'] for s in summaries), runs)}")
+        print(f"replan con pasos agregados:   {_percent(sum(bool(s['replanned']) for s in summaries), runs)}")
+        print(f"destinatario nuevo registrado:{_percent(sum(bool(s['new_recipients']) for s in summaries), runs)}")
+        print(f"transferencia ejecutada:      {_percent(sum(bool(s['transfers_executed']) for s in summaries), runs)}")
+        for path in ("FAST_PATH", "HITL", "BLOCKED", "NONE", "ERROR"):
+            print(f"  camino {path:<9} {_percent(sum(s['execution_path'] == path for s in summaries), runs)}")
+
+    if args.json_out:
+        Path(args.json_out).write_text(json.dumps(summaries, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        print(f"\nResumen guardado en {args.json_out}")
+
+    return 1 if any(s["error"] for s in summaries) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

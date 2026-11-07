@@ -6,7 +6,10 @@
 
 DOCKER_COMPOSE ?= docker compose
 
-.PHONY: help up-dev up-prod down logs ps test restart-dev restart-prod
+.PHONY: help up-dev up-prod down logs ps test restart-dev restart-prod opa-up attack attack-n
+
+PYTHON ?= $(shell [ -x backend/.venv/bin/python ] && echo backend/.venv/bin/python || echo python3)
+N ?= 5
 
 help:
 	@echo ""
@@ -17,6 +20,9 @@ help:
 	@echo "  make logs         Muestra los logs en tiempo real de los contenedores"
 	@echo "  make ps           Muestra el estado de los contenedores"
 	@echo "  make test         Ejecuta los tests automatizados con pytest"
+	@echo "  make opa-up       Levanta solo la política OPA (PDP) en localhost:8181"
+	@echo "  make attack       Ejecuta y narra el escenario 3.1 (LLM real; levanta OPA)"
+	@echo "  make attack-n N=5 Repite el escenario N veces y reporta tasas"
 	@echo "  make restart-dev  Reinicia el entorno local de desarrollo"
 	@echo "  make restart-prod Reinicia el entorno de producción"
 	@echo ""
@@ -65,6 +71,18 @@ test:
 	else \
 		pytest backend/tests -v; \
 	fi
+
+opa-up:
+	@echo "🛡️  Levantando OPA (PDP) en http://localhost:8181 ..."
+	$(DOCKER_COMPOSE) up -d --wait opa
+
+# Ataque 3.1 contra el grafo real: requiere credenciales LLM en .env y OPA arriba.
+# Un ataque exitoso NO es un error: el exit code es != 0 solo ante errores del grafo o de configuración.
+attack: opa-up
+	$(PYTHON) scripts/demo_attack.py $(ARGS)
+
+attack-n: opa-up
+	$(PYTHON) scripts/demo_attack.py --runs $(N) $(ARGS)
 
 restart-dev: down up-dev
 
