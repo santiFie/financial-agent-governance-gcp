@@ -81,20 +81,21 @@ export const App: React.FC = () => {
   }, []);
 
   // Send message
-  const handleSendMessage = async (text: string) => {
+  const handleSendMessage = async (text: string, documentName?: string) => {
     const userMsgId = 'msg_' + Date.now();
     const newMsg: ChatMessage = {
       id: userMsgId,
       sender: 'user',
       text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      attached_document: documentName,
     };
 
     setMessages((prev) => [...prev, newMsg]);
     setLoading(true);
 
     try {
-      const response = await sendChatMessage(text, sessionId);
+      const response = await sendChatMessage(text, sessionId, 'user_default_01', documentName);
 
       const agentMsg: ChatMessage = {
         id: 'agent_' + Date.now(),
@@ -104,6 +105,7 @@ export const App: React.FC = () => {
         status: response.status,
         security_audit: response.security_audit,
         pending_transfer: response.pending_transfer,
+        timeline: response.timeline,
       };
 
       setMessages((prev) => [...prev, agentMsg]);

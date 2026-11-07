@@ -25,7 +25,7 @@ def _approve(session_id, tx_id):
 
 def test_chat_returns_500_when_graph_raises():
     with patch("app.main.financial_graph") as graph:
-        graph.invoke.side_effect = RuntimeError("boom")
+        graph.stream.side_effect = RuntimeError("boom")
         resp = client.post("/api/chat", json={"message": "hola", "session_id": "s_err"})
     assert resp.status_code == 500
     assert "boom" in resp.json()["detail"]

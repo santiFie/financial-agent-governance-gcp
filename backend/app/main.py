@@ -18,12 +18,14 @@ from app.models.api_schemas import (
     ApproveResponse,
     SecurityMetadata,
     PendingTransferInfo,
-    DetectedPII
+    DetectedPII,
+    TimelineEvent,
 )
 from app.graph.graph import financial_graph
 from app.db.mock_banking import mock_banking_db
 from app.core.mcp_action_client import mcp_action_client
 from app.core.telemetry import build_trace_config, get_telemetry_status
+from app.core.timeline import TimelineBuilder, pdp_decision_observer
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -87,15 +89,22 @@ async def chat_endpoint(request: ChatRequest):
         "status": "IN_PROGRESS"
     }
 
+    timeline = TimelineBuilder()
+    observer_token = pdp_decision_observer.set(timeline.on_pdp_decision)
     try:
-        # Runs until completion or until interrupt(); a HITL pause is read back from the checkpointed state below
-        financial_graph.invoke(initial_state, config=config)
+        # Runs until completion or until interrupt(); a HITL pause is read back from the checkpointed state below.
+        # Streaming "updates" only records what each node did (timeline); it does not change the execution.
+        for chunk in financial_graph.stream(initial_state, config=config, stream_mode="updates"):
+            for node_name, node_update in chunk.items():
+                timeline.add_update(node_name, node_update)
     except Exception as e:
         logger.exception("Error ejecutando el grafo para la sesión %s", session_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error ejecutando el grafo: {str(e)}"
         )
+    finally:
+        pdp_decision_observer.reset(observer_token)
 
     # Inspect current state from checkpointer
     graph_state = financial_graph.get_state(config)
@@ -155,7 +164,8 @@ async def chat_endpoint(request: ChatRequest):
             security_audit=security_audit,
             pending_transfer=pending_info,
             document_name=state_values.get("document_name", request.document_name),
-            execution_plan=state_values.get("execution_plan")
+            execution_plan=state_values.get("execution_plan"),
+            timeline=[TimelineEvent(**e) for e in timeline.events],
         )
 
     # If graph finished normally or was blocked
@@ -169,7 +179,8 @@ async def chat_endpoint(request: ChatRequest):
         security_audit=security_audit,
         pending_transfer=None,
         document_name=state_values.get("document_name", request.document_name),
-        execution_plan=state_values.get("execution_plan")
+        execution_plan=state_values.get("execution_plan"),
+        timeline=[TimelineEvent(**e) for e in timeline.events],
     )
 
 

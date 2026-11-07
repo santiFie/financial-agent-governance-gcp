@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Shield, RefreshCw, Lock } from 'lucide-react';
+import { Send, Shield, RefreshCw, Lock, Paperclip, X } from 'lucide-react';
+import { ExecutionTimeline } from './ExecutionTimeline';
 import { ChatMessage, BankAccount, SecurityMetadata } from '../types';
 
 interface ChatViewProps {
   messages: ChatMessage[];
   loading: boolean;
   accounts: BankAccount[];
-  onSendMessage: (text: string) => void;
+  onSendMessage: (text: string, documentName?: string) => void;
   onOpenAudit: (metadata: SecurityMetadata, rawText: string) => void;
   onGoToAdmin: () => void;
 }
@@ -20,6 +21,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onGoToAdmin,
 }) => {
   const [inputText, setInputText] = useState('');
+  const [attachedDocument, setAttachedDocument] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -33,11 +35,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || loading) return;
-    onSendMessage(inputText.trim());
+    onSendMessage(inputText.trim(), attachedDocument.trim() || undefined);
     setInputText('');
   };
 
-  const samplePrompts = [
+  const samplePrompts: { label: string; text: string; document?: string }[] = [
+    { label: "📎 Conciliar con comprobante", text: "Necesito conciliar mis últimos movimientos bancarios con el comprobante de transferencia que adjunté.", document: "comprobante.txt" },
     { label: "💳 Consultar Saldos", text: "¿Podrías indicarme el saldo actual de mis cuentas?" },
     { label: "📜 Ver Movimientos", text: "Quiero ver los últimos movimientos bancarios de mi cuenta." },
     { label: "💸 Transferencia Segura", text: "Por favor transferir $35000 al CBU 0290021110000045678912" },
@@ -137,7 +140,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
           {samplePrompts.map((p, idx) => (
             <button
               key={idx}
-              onClick={() => onSendMessage(p.text)}
+              onClick={() => onSendMessage(p.text, p.document)}
               disabled={loading}
               style={{
                 background: 'rgba(255,255,255,0.04)',
@@ -202,7 +205,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   lineHeight: '1.6',
                   color: isBlocked ? '#fda4af' : '#f8fafc',
                 }}>
+                  {msg.attached_document && (
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', marginBottom: '8px', padding: '3px 8px', borderRadius: '6px', background: 'rgba(255,255,255,0.15)' }}>
+                      <Paperclip size={12} /> {msg.attached_document}
+                    </div>
+                  )}
+                  {msg.attached_document && <br />}
                   {msg.text}
+
+                  {msg.timeline && <ExecutionTimeline events={msg.timeline} />}
 
                   {/* HITL Action Notice */}
                   {isPending && (
@@ -285,6 +296,31 @@ export const ChatView: React.FC<ChatViewProps> = ({
           display: 'flex',
           gap: '12px'
         }}>
+          {attachedDocument ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 10px', borderRadius: '10px', background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(99,102,241,0.4)', color: '#c7d2fe', fontSize: '0.8rem' }}>
+              <Paperclip size={14} />
+              <input
+                type="text"
+                value={attachedDocument}
+                onChange={(e) => setAttachedDocument(e.target.value)}
+                aria-label="Nombre del documento adjunto"
+                style={{ width: '130px', background: 'transparent', border: 'none', outline: 'none', color: '#e0e7ff', fontSize: '0.8rem' }}
+              />
+              <button type="button" onClick={() => setAttachedDocument('')} aria-label="Quitar adjunto" style={{ background: 'transparent', border: 'none', color: '#c7d2fe', cursor: 'pointer', display: 'flex' }}>
+                <X size={14} />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setAttachedDocument('comprobante.txt')}
+              disabled={loading}
+              title="Adjuntar comprobante (documento del bucket simulado)"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-subtle)', borderRadius: '10px', color: '#cbd5e1', cursor: 'pointer', padding: '0 12px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem' }}
+            >
+              <Paperclip size={14} /> Adjuntar comprobante
+            </button>
+          )}
           <input
             type="text"
             value={inputText}

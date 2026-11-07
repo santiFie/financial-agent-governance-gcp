@@ -11,7 +11,8 @@ export async function checkHealth(): Promise<HealthStatus> {
 export async function sendChatMessage(
   message: string,
   sessionId: string,
-  userId: string = 'user_default_01'
+  userId: string = 'user_default_01',
+  documentName?: string
 ) {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
@@ -20,6 +21,7 @@ export async function sendChatMessage(
       message,
       session_id: sessionId,
       user_id: userId,
+      document_name: documentName || undefined,
     }),
   });
 

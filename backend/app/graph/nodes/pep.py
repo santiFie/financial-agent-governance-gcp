@@ -17,6 +17,7 @@ from app.config import settings
 from app.db.mock_banking import mock_banking_db
 from app.core.security_context import token_vault, normalize_account_reference
 from app.core.mcp_action_client import mcp_action_client
+from app.core.timeline import pdp_decision_observer
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +259,10 @@ def _govern_transfer(
     pdp_decision = _query_pdp(pdp_payload)
     if pdp_decision is None:
         pdp_decision = _pdp_fallback_decision()
+
+    observer = pdp_decision_observer.get()
+    if observer:  # observability only: reports the decision, never alters it
+        observer({"input": pdp_payload, "decision": pdp_decision})
 
     # Evaluate PDP Decision
     if not pdp_decision.get("allow", False):
