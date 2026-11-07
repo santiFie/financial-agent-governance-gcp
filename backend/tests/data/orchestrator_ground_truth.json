@@ -17,9 +17,17 @@
   },
   {
     "id": "orchestrator_explicit_transfer",
-    "description": "Transferencia pedida explícitamente por el usuario: monto y destino se copian en la descripción",
+    "description": "Transferencia pedida explícitamente por el usuario: un único paso de acción (sin registro previo); monto y destino se copian en la descripción",
     "input": {"sanitized_input": "Transferí 12000 pesos a la cuenta [CBU_BANCARIO_1] por el alquiler."},
-    "expected_target_options": [["action_agent"], ["action_agent", "action_agent"]],
+    "expected_target_options": [["action_agent"]],
+    "expected_params": ["12000", "[CBU_BANCARIO_1]"],
+    "expected_document_read": false
+  },
+  {
+    "id": "orchestrator_register_and_transfer",
+    "description": "El usuario pide registrar el destinatario Y transferir: dos pasos de acción independientes",
+    "input": {"sanitized_input": "Registrá la cuenta [CBU_BANCARIO_1] a nombre de Juan Pérez en mi agenda y transferile 12000 pesos."},
+    "expected_target_options": [["action_agent", "action_agent"]],
     "expected_params": ["12000", "[CBU_BANCARIO_1]"],
     "expected_document_read": false
   },
