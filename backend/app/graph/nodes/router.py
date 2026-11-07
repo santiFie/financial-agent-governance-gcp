@@ -11,11 +11,12 @@ Per invocation:
    The LLM either requests read_document_tool (executed by the graph's ToolNode) or emits a PlanUpdate
    that appends new steps. An empty PlanUpdate with no pending steps ends the plan.
 """
+
 import logging
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.core.llm import get_chat_model
@@ -34,6 +35,7 @@ class OrchestratorError(RuntimeError):
 
 class PlanStep(BaseModel):
     """Plan step as stored by the system. step_id and result are never set by the LLM."""
+
     step_id: int = Field(description="Identificador único del paso (1, 2, ...)")
     title: str = Field(description="Descripción breve de la acción a ejecutar")
     target_node: TargetNode = Field(description="Agente que ejecuta el paso")
@@ -43,6 +45,7 @@ class PlanStep(BaseModel):
 
 class NewPlanStep(BaseModel):
     """Plan step as emitted by the LLM."""
+
     title: str = Field(description="Descripción breve de la acción a ejecutar")
     target_node: TargetNode = Field(description="Agente que ejecuta el paso")
     description: str = Field(
@@ -56,6 +59,7 @@ class NewPlanStep(BaseModel):
 
 class PlanUpdate(BaseModel):
     """Decisión final del turno del Orquestador: pasos nuevos a agregar al plan (vacío si no falta trabajo)."""
+
     new_steps: List[NewPlanStep] = Field(
         default_factory=list,
         description="Pasos nuevos a agregar al final del plan. Vacío si no hace falta más trabajo.",
@@ -72,8 +76,8 @@ class PlanUpdate(BaseModel):
 def _render_attachment(document_name: Optional[str]) -> str:
     """Tells the Orchestrator whether the request carries an attached document and how to refer to it."""
     if not document_name:
-        return "<attached_document available=\"no\" />"
-    return f"<attached_document available=\"yes\" filename=\"{document_name}\" />"
+        return '<attached_document available="no" />'
+    return f'<attached_document available="yes" filename="{document_name}" />'
 
 
 def _build_context(state: AgentState) -> str:
@@ -206,9 +210,7 @@ def _orchestrate(state: AgentState) -> Dict[str, Any]:
                 f"El Orquestador excedió el máximo de {settings.orchestrator_max_tool_iterations} rondas de herramientas."
             )
         return {
-            "orchestrator_scratchpad": [
-                AIMessage(content=ai_msg.content or "", tool_calls=document_calls)
-            ],
+            "orchestrator_scratchpad": [AIMessage(content=ai_msg.content or "", tool_calls=document_calls)],
             "orchestrator_tool_rounds": rounds + 1,
             "detected_pii": _merge_document_pii(state, scratchpad, rounds > 0),
         }
@@ -220,9 +222,7 @@ def _orchestrate(state: AgentState) -> Dict[str, Any]:
 
     room = max(settings.orchestrator_max_plan_steps - len(plan), 0)
     if len(update.new_steps) > room:
-        logger.warning(
-            f"[Orchestrator] PlanUpdate truncado: {len(update.new_steps)} pasos solicitados, cupo {room}."
-        )
+        logger.warning(f"[Orchestrator] PlanUpdate truncado: {len(update.new_steps)} pasos solicitados, cupo {room}.")
     new_steps = [
         PlanStep(
             step_id=len(plan) + idx + 1,

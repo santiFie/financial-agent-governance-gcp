@@ -1,4 +1,5 @@
 """Shared pytest setup: make the repo root importable (mcp_financial_action_server is a top-level package)."""
+
 import sys
 from pathlib import Path
 

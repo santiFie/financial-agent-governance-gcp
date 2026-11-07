@@ -4,6 +4,7 @@
 Needs no LLM, no Docker and no credentials: anyone can inspect the recorded attack runs.
 Usage: python3 scripts/serve_results.py [--port 8765] [--no-open]
 """
+
 import argparse
 import functools
 import http.server

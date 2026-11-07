@@ -2,8 +2,9 @@
 FastMCP Financial Action Server.
 Exposes critical asset-modifying tools conforming to the Model Context Protocol (MCP).
 """
-import sys
-from typing import Optional, Dict, Any
+
+from typing import Any, Dict, Optional
+
 from fastmcp import FastMCP
 from starlette.responses import JSONResponse
 

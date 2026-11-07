@@ -1,4 +1,5 @@
 """Offline tests for DocumentIngestionService (local_storage vs GCS with local fallback)."""
+
 from unittest.mock import patch
 
 import pytest

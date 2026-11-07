@@ -4,6 +4,7 @@ Offline tests (mocked LLM) for the Orchestrator node (`router_node`).
 They cover plan mechanics only: no document, amount or recipient from any threat scenario appears here.
 Plan quality with a real LLM is measured in `test_orchestrator_evals.py`.
 """
+
 from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage, ToolMessage
@@ -15,11 +16,13 @@ from app.graph.nodes.router import FAILURE_MESSAGE, router_node
 def _plan_update_msg(new_steps=None, final_answer=None) -> AIMessage:
     return AIMessage(
         content="",
-        tool_calls=[{
-            "name": "PlanUpdate",
-            "args": {"new_steps": new_steps or [], "final_answer": final_answer},
-            "id": "call_plan",
-        }],
+        tool_calls=[
+            {
+                "name": "PlanUpdate",
+                "args": {"new_steps": new_steps or [], "final_answer": final_answer},
+                "id": "call_plan",
+            }
+        ],
     )
 
 
@@ -40,8 +43,13 @@ def _llm_returning(message: AIMessage):
 
 
 def _step(step_id, target="read_only_agent", result=None):
-    return {"step_id": step_id, "title": f"paso {step_id}", "target_node": target,
-            "description": f"descripcion {step_id}", "result": result}
+    return {
+        "step_id": step_id,
+        "title": f"paso {step_id}",
+        "target_node": target,
+        "description": f"descripcion {step_id}",
+        "result": result,
+    }
 
 
 def _new_step(target="read_only_agent", title="t", description="d"):
@@ -79,7 +87,9 @@ def test_replan_appends_after_existing_steps_without_modifying_them():
 
 def test_plan_update_is_truncated_to_max_plan_steps(monkeypatch):
     monkeypatch.setattr(settings, "orchestrator_max_plan_steps", 2)
-    res, _ = _run({"execution_plan": [_step(1, result="ok")]}, _plan_update_msg([_new_step(), _new_step(), _new_step()]))
+    res, _ = _run(
+        {"execution_plan": [_step(1, result="ok")]}, _plan_update_msg([_new_step(), _new_step(), _new_step()])
+    )
 
     assert len(res["execution_plan"]) == 2
 
@@ -147,7 +157,8 @@ def test_document_tool_call_goes_to_scratchpad_and_counts_a_round():
 
 def test_blocked_document_short_circuits_as_threat():
     blocked = ToolMessage(
-        content="bloqueado", tool_call_id="call_doc",
+        content="bloqueado",
+        tool_call_id="call_doc",
         artifact={"status": "BLOCKED", "threat_category": "PROMPT_INJECTION", "threat_reason": "x", "detected_pii": []},
     )
     with patch("app.graph.nodes.router.get_chat_model", side_effect=AssertionError("LLM no debe invocarse")):
@@ -160,8 +171,7 @@ def test_blocked_document_short_circuits_as_threat():
 
 def test_document_pii_is_accumulated_in_audit_trail():
     pii = {"pii_type": "CBU", "token_assigned": "[CBU_BANCARIO_1]"}
-    tool_msg = ToolMessage(content="ok", tool_call_id="call_doc",
-                           artifact={"status": "OK", "detected_pii": [pii]})
+    tool_msg = ToolMessage(content="ok", tool_call_id="call_doc", artifact={"status": "OK", "detected_pii": [pii]})
     res, _ = _run(
         {"orchestrator_scratchpad": [_document_call_msg(), tool_msg], "orchestrator_tool_rounds": 1},
         _plan_update_msg([_new_step()]),

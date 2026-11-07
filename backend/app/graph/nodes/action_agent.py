@@ -5,22 +5,23 @@ Every tool call is only staged into pending_tool_calls (transfers also into pend
 Enforcement Point (pep_node) asks the PDP about each one, executes the allowed ones and completes the step.
 Decoupled from interrupt(), which is delegated to pep_node.
 """
+
 import logging
+from typing import Any, Dict, List
+
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
-from typing import Dict, Any, List
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from langchain_core.messages import ToolMessage
 from langgraph.prebuilt import ToolNode, create_react_agent
-from app.graph.state import AgentState
-from app.graph.plan_utils import get_active_step, complete_active_step
-from app.graph.tools.banking_write import (
-    register_recipient_tool,
-    transfer_funds_tool,
-    ACTION_TOOLS,
-)
+
 from app.core.llm import get_chat_model
 from app.core.prompt_manager import prompt_manager
 from app.core.security_context import normalize_account_reference
+from app.graph.plan_utils import complete_active_step, get_active_step
+from app.graph.state import AgentState
+from app.graph.tools.banking_write import (
+    ACTION_TOOLS,
+    transfer_funds_tool,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ def _build_executor():
         raise RuntimeError("Action Agent: no hay credenciales LLM configuradas.")
     # Tool errors go back to the model as tool messages so the ReAct loop can correct itself.
     return create_react_agent(model=llm, tools=ToolNode(ACTION_TOOLS, handle_tool_errors=True))
+
 
 def _text(content: Any) -> str:
     if isinstance(content, list):
@@ -49,7 +51,7 @@ def action_agent_node(state: AgentState, config: RunnableConfig = None) -> Dict[
     session_id = state.get("session_id", "default")
     user_id = state.get("user_id", "user_default_01")
     active_step = get_active_step(state)
-    
+
     task = (active_step or {}).get("description") or state.get("sanitized_input", "")
 
     # Combinar RunnableConfig entrante con configurable.user_id para preservar trazabilidad
@@ -58,7 +60,6 @@ def action_agent_node(state: AgentState, config: RunnableConfig = None) -> Dict[
     configurable["user_id"] = user_id
     exec_config["configurable"] = configurable
 
-
     system_prompt = prompt_manager.render(
         "action_agent",
         session_id=session_id,
@@ -66,14 +67,9 @@ def action_agent_node(state: AgentState, config: RunnableConfig = None) -> Dict[
         source_acc=SOURCE_ACCOUNT,
     )
     result = _build_executor().invoke(
-    {
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": task}
-        ]
-    },
-    config=exec_config
-)
+        {"messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": task}]},
+        config=exec_config,
+    )
 
     messages = result["messages"]
     step_output = _text(messages[-1].content)

@@ -2,16 +2,18 @@
 Unit and integration tests for Policy Enforcement Point (PEP) Node and PDP Integration.
 Validates Plan 4: Fast-Path execution for trusted recipients < $50.000 ARS and HITL interrupt governance.
 """
-import pytest
+
 from unittest.mock import MagicMock, patch
+
 import httpx
+import pytest
+from mcp_financial_action_server.storage import financial_storage
 
 from app.config import settings
-from app.graph.nodes.pep import pep_node
-from app.db.mock_banking import mock_banking_db
 from app.core.mcp_action_client import mcp_action_client
 from app.core.security_context import token_vault
-from mcp_financial_action_server.storage import financial_storage
+from app.db.mock_banking import mock_banking_db
+from app.graph.nodes.pep import pep_node
 
 
 def _pdp_response(decision, status_code=200):
@@ -50,12 +52,9 @@ def test_pep_fast_path_when_trusted_and_under_threshold():
 
     # 1. Register recipient in address book
     mcp_action_client.register_account(
-        user_id=user_id,
-        cbu_or_cvu=cbu,
-        holder_name="Fideicomiso Recaudador Fiscal",
-        bank_name="Banco Nación"
+        user_id=user_id, cbu_or_cvu=cbu, holder_name="Fideicomiso Recaudador Fiscal", bank_name="Banco Nación"
     )
-    assert mcp_action_client.is_trusted_recipient(user_id, cbu) == True
+    assert mcp_action_client.is_trusted_recipient(user_id, cbu)
 
     # 2. Prepare state with pending transfer call
     state = {
@@ -69,8 +68,8 @@ def test_pep_fast_path_when_trusted_and_under_threshold():
                     "source_account": "acc_001",
                     "destination_account": cbu,
                     "amount": amount,
-                    "concept": "Ajuste Fiscal 11222"
-                }
+                    "concept": "Ajuste Fiscal 11222",
+                },
             }
         ],
         "pending_transfer": {
@@ -79,20 +78,20 @@ def test_pep_fast_path_when_trusted_and_under_threshold():
             "amount": amount,
             "source_account": "acc_001",
             "destination": cbu,
-        }
+        },
     }
 
-    mock_resp = _pdp_response({
-        "allow": True,
-        "require_hitl": False,
-        "reason": "Fast-Path aprobado: destinatario registrado y monto inferior a $50.000 ARS"
-    })
+    mock_resp = _pdp_response(
+        {
+            "allow": True,
+            "require_hitl": False,
+            "reason": "Fast-Path aprobado: destinatario registrado y monto inferior a $50.000 ARS",
+        }
+    )
 
     initial_balance = financial_storage.get_account("acc_001").balance
 
-    with patch("httpx.Client.post", return_value=mock_resp), \
-         patch("app.graph.nodes.pep.interrupt") as mock_interrupt:
-
+    with patch("httpx.Client.post", return_value=mock_resp), patch("app.graph.nodes.pep.interrupt") as mock_interrupt:
         result = pep_node(state)
 
         # 3. Assert Fast-Path: interrupt was NOT called
@@ -120,10 +119,7 @@ def test_pep_hitl_when_amount_exceeds_threshold():
     amount = 75000.0  # Exceeds $50.000 ARS
 
     mcp_action_client.register_account(
-        user_id=user_id,
-        cbu_or_cvu=cbu,
-        holder_name="Proveedor Mayorista",
-        bank_name="Banco Macro"
+        user_id=user_id, cbu_or_cvu=cbu, holder_name="Proveedor Mayorista", bank_name="Banco Macro"
     )
 
     state = {
@@ -137,23 +133,24 @@ def test_pep_hitl_when_amount_exceeds_threshold():
                     "source_account": "acc_001",
                     "destination_account": cbu,
                     "amount": amount,
-                    "concept": "Pago Factura"
-                }
+                    "concept": "Pago Factura",
+                },
             }
-        ]
+        ],
     }
 
-    mock_resp = _pdp_response({
-        "allow": True,
-        "require_hitl": True,
-        "reason": "Monto supera el umbral de Fast-Path ($50.000 ARS)"
-    })
+    mock_resp = _pdp_response(
+        {"allow": True, "require_hitl": True, "reason": "Monto supera el umbral de Fast-Path ($50.000 ARS)"}
+    )
 
     initial_balance = financial_storage.get_account("acc_001").balance
 
-    with patch("httpx.Client.post", return_value=mock_resp), \
-         patch("app.graph.nodes.pep.interrupt", return_value={"decision": "APPROVED", "admin_user": "oficial_riesgo"}) as mock_interrupt:
-
+    with (
+        patch("httpx.Client.post", return_value=mock_resp),
+        patch(
+            "app.graph.nodes.pep.interrupt", return_value={"decision": "APPROVED", "admin_user": "oficial_riesgo"}
+        ) as mock_interrupt,
+    ):
         result = pep_node(state)
 
         # 1. interrupt was called
@@ -190,20 +187,21 @@ def test_pep_hitl_when_untrusted_recipient():
                     "source_account": "acc_001",
                     "destination_account": cbu,
                     "amount": amount,
-                }
+                },
             }
-        ]
+        ],
     }
 
-    mock_resp = _pdp_response({
-        "allow": True,
-        "require_hitl": True,
-        "reason": "Destinatario no registrado en agenda de confianza"
-    })
+    mock_resp = _pdp_response(
+        {"allow": True, "require_hitl": True, "reason": "Destinatario no registrado en agenda de confianza"}
+    )
 
-    with patch("httpx.Client.post", return_value=mock_resp), \
-         patch("app.graph.nodes.pep.interrupt", return_value={"decision": "APPROVED", "admin_user": "oficial"}) as mock_interrupt:
-
+    with (
+        patch("httpx.Client.post", return_value=mock_resp),
+        patch(
+            "app.graph.nodes.pep.interrupt", return_value={"decision": "APPROVED", "admin_user": "oficial"}
+        ) as mock_interrupt,
+    ):
         result = pep_node(state)
         mock_interrupt.assert_called_once()
         assert result["status"] == "COMPLETED"
@@ -228,18 +226,22 @@ def test_pep_hitl_rejected_by_human():
                     "source_account": "acc_001",
                     "destination_account": cbu,
                     "amount": amount,
-                }
+                },
             }
-        ]
+        ],
     }
 
     initial_balance = financial_storage.get_account("acc_001").balance
 
     hitl_resp = _pdp_response({"allow": True, "require_hitl": True, "reason": "HITL requerido"})
 
-    with patch("httpx.Client.post", return_value=hitl_resp), \
-         patch("app.graph.nodes.pep.interrupt", return_value={"decision": "REJECTED", "admin_user": "auditor", "reason": "Patrón anómalo"}) as mock_interrupt:
-
+    with (
+        patch("httpx.Client.post", return_value=hitl_resp),
+        patch(
+            "app.graph.nodes.pep.interrupt",
+            return_value={"decision": "REJECTED", "admin_user": "auditor", "reason": "Patrón anómalo"},
+        ) as mock_interrupt,
+    ):
         result = pep_node(state)
         mock_interrupt.assert_called_once()
         assert result["approval_status"] == "REJECTED"
@@ -252,19 +254,26 @@ def _fallback_state(session_id, cbu, amount):
     return {
         "session_id": session_id,
         "user_id": "user_default_01",
-        "pending_tool_calls": [{"name": "transfer_funds_tool", "args": {
-            "source_account": "acc_001", "destination_account": cbu, "amount": amount}}],
+        "pending_tool_calls": [
+            {
+                "name": "transfer_funds_tool",
+                "args": {"source_account": "acc_001", "destination_account": cbu, "amount": amount},
+            }
+        ],
     }
 
 
-@pytest.mark.parametrize("pdp_failure", [
-    {"side_effect": httpx.ConnectTimeout("PDP connection timed out")},
-    {"side_effect": httpx.ConnectError("PDP offline")},
-    {"return_value": _pdp_response({"allow": True}, status_code=500)},
-    {"return_value": _pdp_response({"allow": True}, status_code=404)},
-    {"return_value": MagicMock(status_code=200, json=MagicMock(return_value={}))},
-    {"return_value": MagicMock(status_code=200, json=MagicMock(return_value={"result": {"reason": "sin allow"}}))},
-])
+@pytest.mark.parametrize(
+    "pdp_failure",
+    [
+        {"side_effect": httpx.ConnectTimeout("PDP connection timed out")},
+        {"side_effect": httpx.ConnectError("PDP offline")},
+        {"return_value": _pdp_response({"allow": True}, status_code=500)},
+        {"return_value": _pdp_response({"allow": True}, status_code=404)},
+        {"return_value": MagicMock(status_code=200, json=MagicMock(return_value={}))},
+        {"return_value": MagicMock(status_code=200, json=MagicMock(return_value={"result": {"reason": "sin allow"}}))},
+    ],
+)
 def test_pep_fails_closed_when_pdp_unavailable(pdp_failure, caplog):
     """
     PDP unreachable, non-200 or without a usable decision -> fallback mode 'deny':
@@ -276,10 +285,12 @@ def test_pep_fails_closed_when_pdp_unavailable(pdp_failure, caplog):
     )
     initial_balance = financial_storage.get_account("acc_001").balance
 
-    with patch("httpx.Client.post", **pdp_failure), \
-         patch("app.graph.nodes.pep.interrupt") as mock_interrupt, \
-         patch.object(settings, "pdp_fallback_mode", "deny"), \
-         caplog.at_level("WARNING", logger="app.graph.nodes.pep"):
+    with (
+        patch("httpx.Client.post", **pdp_failure),
+        patch("app.graph.nodes.pep.interrupt") as mock_interrupt,
+        patch.object(settings, "pdp_fallback_mode", "deny"),
+        caplog.at_level("WARNING", logger="app.graph.nodes.pep"),
+    ):
         result = pep_node(_fallback_state("sess_fallback_deny", cbu, 20000.0))
 
     mock_interrupt.assert_not_called()
@@ -299,9 +310,13 @@ def test_pep_fallback_mode_hitl_degrades_to_human_approval():
     )
     initial_balance = financial_storage.get_account("acc_001").balance
 
-    with patch("httpx.Client.post", side_effect=httpx.ConnectError("PDP offline")), \
-         patch.object(settings, "pdp_fallback_mode", "hitl"), \
-         patch("app.graph.nodes.pep.interrupt", return_value={"decision": "REJECTED", "admin_user": "auditor"}) as mock_interrupt:
+    with (
+        patch("httpx.Client.post", side_effect=httpx.ConnectError("PDP offline")),
+        patch.object(settings, "pdp_fallback_mode", "hitl"),
+        patch(
+            "app.graph.nodes.pep.interrupt", return_value={"decision": "REJECTED", "admin_user": "auditor"}
+        ) as mock_interrupt,
+    ):
         result = pep_node(_fallback_state("sess_fallback_hitl", cbu, 20000.0))
 
     mock_interrupt.assert_called_once()
@@ -322,8 +337,14 @@ def test_pep_sends_opa_input_envelope_to_configured_url():
 
     args, kwargs = mock_post.call_args
     assert args[0] == settings.pdp_url
-    assert kwargs["json"] == {"input": {"user_id": "user_default_01", "tool_name": "transfer_funds_tool", "amount": 1000.0,
-                                 "is_trusted_recipient": True}}
+    assert kwargs["json"] == {
+        "input": {
+            "user_id": "user_default_01",
+            "tool_name": "transfer_funds_tool",
+            "amount": 1000.0,
+            "is_trusted_recipient": True,
+        }
+    }
 
 
 def test_pep_blocks_when_pdp_denies():
@@ -343,20 +364,20 @@ def test_pep_blocks_when_pdp_denies():
                     "source_account": "acc_001",
                     "destination_account": cbu,
                     "amount": 10000.0,
-                }
+                },
             }
-        ]
+        ],
     }
 
-    mock_resp = _pdp_response({
-        "allow": False,
-        "require_hitl": False,
-        "reason": "Destinatario bloqueado en lista negra por prevención de lavado"
-    })
+    mock_resp = _pdp_response(
+        {
+            "allow": False,
+            "require_hitl": False,
+            "reason": "Destinatario bloqueado en lista negra por prevención de lavado",
+        }
+    )
 
-    with patch("httpx.Client.post", return_value=mock_resp), \
-         patch("app.graph.nodes.pep.interrupt") as mock_interrupt:
-
+    with patch("httpx.Client.post", return_value=mock_resp), patch("app.graph.nodes.pep.interrupt") as mock_interrupt:
         result = pep_node(state)
         mock_interrupt.assert_not_called()
         assert result["status"] == "BLOCKED"
@@ -374,10 +395,7 @@ def test_pep_resolves_surrogate_token_for_trusted_check():
 
     token_vault.store_token(session_id, token, real_cbu)
     mcp_action_client.register_account(
-        user_id=user_id,
-        cbu_or_cvu=real_cbu,
-        holder_name="Fideicomiso Recaudador Fiscal",
-        bank_name="Banco Nación"
+        user_id=user_id, cbu_or_cvu=real_cbu, holder_name="Fideicomiso Recaudador Fiscal", bank_name="Banco Nación"
     )
 
     state = {
@@ -391,9 +409,9 @@ def test_pep_resolves_surrogate_token_for_trusted_check():
                     "source_account": "acc_001",
                     "destination_account": token,
                     "amount": amount,
-                }
+                },
             }
-        ]
+        ],
     }
 
     captured_payload = None
@@ -403,9 +421,7 @@ def test_pep_resolves_surrogate_token_for_trusted_check():
         captured_payload = json
         return _pdp_response({"allow": True, "require_hitl": False, "reason": "Fast-Path approved"})
 
-    with patch("httpx.Client.post", side_effect=fake_post), \
-         patch("app.graph.nodes.pep.interrupt") as mock_interrupt:
-
+    with patch("httpx.Client.post", side_effect=fake_post), patch("app.graph.nodes.pep.interrupt") as mock_interrupt:
         result = pep_node(state)
         mock_interrupt.assert_not_called()
         assert result["status"] == "COMPLETED"
@@ -420,8 +436,12 @@ def test_pep_reports_failure_when_mcp_rejects_the_transfer():
     state = {
         "session_id": "sess_mcp_fail",
         "user_id": "user_default_01",
-        "pending_tool_calls": [{"name": "transfer_funds_tool", "args": {
-            "source_account": "acc_001", "destination_account": "[CBU_NO_RESUELTO_1]", "amount": 1000.0}}],
+        "pending_tool_calls": [
+            {
+                "name": "transfer_funds_tool",
+                "args": {"source_account": "acc_001", "destination_account": "[CBU_NO_RESUELTO_1]", "amount": 1000.0},
+            }
+        ],
     }
     initial_balance = financial_storage.get_account("acc_001").balance
     mock_resp = _pdp_response({"allow": True, "require_hitl": False, "reason": "fast"})
@@ -438,11 +458,15 @@ def _register_state(session_id: str, cbu: str) -> dict:
     return {
         "session_id": session_id,
         "user_id": "user_default_01",
-        "execution_plan": [{"step_id": 1, "title": "t", "target_node": "action_agent", "description": "d", "result": None}],
-        "pending_tool_calls": [{
-            "name": "register_recipient_tool",
-            "args": {"user_id": "user_default_01", "recipient_name": "Proveedor", "cbu": cbu},
-        }],
+        "execution_plan": [
+            {"step_id": 1, "title": "t", "target_node": "action_agent", "description": "d", "result": None}
+        ],
+        "pending_tool_calls": [
+            {
+                "name": "register_recipient_tool",
+                "args": {"user_id": "user_default_01", "recipient_name": "Proveedor", "cbu": cbu},
+            }
+        ],
     }
 
 
@@ -450,10 +474,15 @@ def test_pep_sends_registration_to_the_pdp_with_the_tool_name_and_registers_when
     cbu = "0170099900000012345678"
     allow = _pdp_response({"allow": True, "require_hitl": False, "reason": "Herramienta sin movimiento de fondos"})
 
-    with patch("httpx.Client.post", return_value=allow) as mock_post, patch("app.graph.nodes.pep.interrupt") as interrupt:
+    with (
+        patch("httpx.Client.post", return_value=allow) as mock_post,
+        patch("app.graph.nodes.pep.interrupt") as interrupt,
+    ):
         result = pep_node(_register_state("sess_reg_allow", cbu))
 
-    assert mock_post.call_args.kwargs["json"] == {"input": {"user_id": "user_default_01", "tool_name": "register_recipient_tool"}}
+    assert mock_post.call_args.kwargs["json"] == {
+        "input": {"user_id": "user_default_01", "tool_name": "register_recipient_tool"}
+    }
     interrupt.assert_not_called()
     assert mcp_action_client.is_trusted_recipient("user_default_01", cbu)
     assert result["status"] == "COMPLETED"

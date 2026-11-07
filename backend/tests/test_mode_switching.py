@@ -1,4 +1,5 @@
 """Local <-> GCP switching by environment variables, with the GCP clients mocked (no network, no credentials)."""
+
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -28,9 +29,11 @@ def test_dlp_uses_local_mock_in_local_mock_mode():
 
 def test_dlp_uses_cloud_dlp_in_gcp_live_mode():
     fake = _fake_dlp_module()
-    with patch.object(settings, "security_mode", "gcp_live"), \
-         patch.dict(sys.modules, {"google.cloud.dlp_v2": fake}), \
-         patch("google.cloud.dlp_v2", fake, create=True):
+    with (
+        patch.object(settings, "security_mode", "gcp_live"),
+        patch.dict(sys.modules, {"google.cloud.dlp_v2": fake}),
+        patch("google.cloud.dlp_v2", fake, create=True),
+    ):
         sanitizer = DLPSanitizer()
         assert sanitizer._dlp_client is not None
         with patch.object(sanitizer, "_sanitize_with_gcp_dlp", return_value=("x", [])) as gcp:
@@ -48,9 +51,11 @@ def test_model_armor_uses_gcp_runnable_when_enabled_and_templated():
     runnable.invoke.return_value = {"is_threat": True, "threat_category": "GCP_CAT", "threat_reason": "r"}
     fake_module = MagicMock()
     fake_module.ModelArmorSanitizePromptRunnable.return_value = runnable
-    with patch.object(settings, "use_gcp_model_armor", True), \
-         patch.object(settings, "model_armor_template_id", "tpl-1"), \
-         patch.dict(sys.modules, {"langchain_google_community.model_armor": fake_module}):
+    with (
+        patch.object(settings, "use_gcp_model_armor", True),
+        patch.object(settings, "model_armor_template_id", "tpl-1"),
+        patch.dict(sys.modules, {"langchain_google_community.model_armor": fake_module}),
+    ):
         guard = HybridModelArmorGuard()
         assert guard._get_runnable() is runnable
         assert guard.inspect("texto") == (True, "GCP_CAT", "r")

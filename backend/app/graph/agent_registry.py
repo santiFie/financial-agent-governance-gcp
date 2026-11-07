@@ -3,6 +3,7 @@ Agent Registry.
 Single source of truth for the executable agents the Orchestrator can delegate plan steps to.
 Adding a new agent only requires registering it here (and in the graph); prompts and routing adapt automatically.
 """
+
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict
@@ -40,6 +41,4 @@ AGENT_REGISTRY: Dict[TargetNode, AgentSpec] = {
 
 def render_agents_catalog() -> str:
     """Renders the agent catalog injected into the Orchestrator prompts."""
-    return "\n".join(
-        f"- '{target.value}': {spec.description}" for target, spec in AGENT_REGISTRY.items()
-    )
+    return "\n".join(f"- '{target.value}': {spec.description}" for target, spec in AGENT_REGISTRY.items())

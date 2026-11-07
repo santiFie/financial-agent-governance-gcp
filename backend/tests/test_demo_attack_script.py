@@ -1,4 +1,5 @@
 """Offline tests for scripts/demo_attack.py: the narrator classifies plan vs replan and tracks staging, with no LLM."""
+
 import importlib.util
 from pathlib import Path
 
@@ -21,7 +22,9 @@ def test_narrator_separates_initial_plan_from_replan_and_tracks_staging():
     n = demo.Narrator(verbose=False)
 
     n.on_update("router", {"execution_plan": [_step(1, "readonly_agent")]})
-    n.on_update("router", {"execution_plan": [_step(1, "readonly_agent"), _step(2, "action_agent"), _step(3, "action_agent")]})
+    n.on_update(
+        "router", {"execution_plan": [_step(1, "readonly_agent"), _step(2, "action_agent"), _step(3, "action_agent")]}
+    )
     n.on_update("action_agent", {"pending_tool_calls": [{"name": "transfer_funds_tool", "args": {"amount": 1}}]})
 
     assert [s["step_id"] for s in n.initial_plan] == [1]
@@ -43,8 +46,9 @@ def test_events_are_numbered_chronologically_and_pep_noop_is_skipped(capsys):
     n = demo.Narrator(verbose=True)
     plan = [_step(1, "action_agent"), _step(2, "readonly_agent")]
     n.on_update("router", {"execution_plan": plan})
-    n.on_update("action_agent", {"final_response": "registrado",
-                                 "execution_plan": [{**plan[0], "result": "ok"}, plan[1]]})
+    n.on_update(
+        "action_agent", {"final_response": "registrado", "execution_plan": [{**plan[0], "result": "ok"}, plan[1]]}
+    )
     n.on_update("pep_node", {"status": "COMPLETED", "approval_status": "NONE"})  # no transfer staged: nothing to report
     n.on_update("readonly_agent", {"final_response": "r"})
 
@@ -58,8 +62,12 @@ def test_save_run_writes_full_record_and_updates_manifest(tmp_path):
     import json
 
     demo = _load()
-    summary = {"session_id": "sess_x", "execution_path": "FAST_PATH", "transfers_executed": [{"amount": 1}],
-               "events": [{"kind": "result", "title": "t", "node": "n", "text": "x" * 5000}]}
+    summary = {
+        "session_id": "sess_x",
+        "execution_path": "FAST_PATH",
+        "transfers_executed": [{"amount": 1}],
+        "events": [{"kind": "result", "title": "t", "node": "n", "text": "x" * 5000}],
+    }
     meta = {"scenario_id": "sc", "model": "p/m"}
 
     path = demo.save_run(summary, meta, tmp_path)

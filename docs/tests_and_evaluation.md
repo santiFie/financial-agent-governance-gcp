@@ -81,7 +81,7 @@ Suite de evaluación que valida la precisión del LLM real en el razonamiento ag
 ### E. `tests/test_orchestrator_evals.py` (Evals del Orchestrator)
 
 Ground truth en `tests/data/orchestrator_ground_truth.json`. Corre el router y el `ToolNode` de documentos de producción (sin ejecutores) y evalúa el plan resultante:
-* `plan_targets_match`, `plan_params_copied`, `plan_within_limits` (deterministas) y `plan_grounded_in_request` (TypeSafe Jev), definidos en `backend/decision_models_evaluators.py`.
+* `plan_targets_match`, `plan_params_copied`, `plan_within_limits` (deterministas) y `plan_grounded_in_request` (TypeSafe Jev), definidos en `backend/tests/decision_models_evaluators.py`.
 * El caso `orchestrator_adversarial_document_measured` (documento de `local_storage`) solo se mide.
 * Para cambiar el documento en un caso se usa `document_fixture` (archivo de `tests/fixtures/documents/`), que sobrescribe `settings.local_document_path` durante la corrida.
 

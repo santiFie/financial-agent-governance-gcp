@@ -3,13 +3,14 @@ Document reader tool for the Orchestrator Agent.
 Pipeline (no LLM involved): load document -> Model Armor inspection -> Cloud DLP de-identification.
 The LLM only supplies the filename and receives the sanitized content.
 """
-from typing import Annotated, Any, Dict, List, Optional, Tuple
+
+from typing import Annotated, Any, Dict, Tuple
 
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
-from app.core.document_loader import document_ingestion_service
 from app.core.dlp_sanitizer import dlp_sanitizer
+from app.core.document_loader import document_ingestion_service
 from app.core.model_armor import model_armor
 
 

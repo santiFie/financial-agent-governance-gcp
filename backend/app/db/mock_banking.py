@@ -1,9 +1,10 @@
 """
 Staged-transfer queue for Human-in-the-Loop approval.
 """
-from typing import Dict, List, Optional, Any
-from datetime import datetime, timezone
+
 import uuid
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 
 class MockBankingDB:
@@ -12,16 +13,12 @@ class MockBankingDB:
     Accounts, balances, movements and transfer execution live in the MCP action server;
     this store only keeps the transfers staged for human review.
     """
+
     def __init__(self):
         self.pending_transfers: Dict[str, Dict[str, Any]] = {}
 
     def stage_transfer(
-        self,
-        session_id: str,
-        user_id: str,
-        amount: float,
-        source_account_id: str,
-        target_token: str
+        self, session_id: str, user_id: str, amount: float, source_account_id: str, target_token: str
     ) -> Dict[str, Any]:
         """
         Stages a transfer request into the pending approval queue.
@@ -37,7 +34,7 @@ class MockBankingDB:
             "source_account": source_account_id,
             "target_token": target_token,
             "status": "PENDING_APPROVAL",
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": datetime.utcnow().isoformat(),
         }
         self.pending_transfers[tx_id] = transfer_record
         return transfer_record
@@ -70,4 +67,3 @@ class MockBankingDB:
 
 
 mock_banking_db = MockBankingDB()
-

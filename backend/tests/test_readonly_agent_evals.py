@@ -8,20 +8,21 @@ Validates that:
 4. The active step in execution_plan is updated with the synthesized response and marked completed.
 5. LangSmith observability and telemetry context (RunnableConfig, trace_id, tags, metadata) is preserved throughout execution.
 """
+
+import logging
 import os
 import time
 import uuid
-import logging
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List
 from unittest.mock import patch
-import pytest
 
-from langsmith import traceable, Client
+import pytest
+from langsmith import Client, traceable
+from mcp_financial_action_server.storage import financial_storage
 
 from app.config import settings
 from app.core.llm import get_chat_model
 from app.core.telemetry import build_trace_config
-from mcp_financial_action_server.storage import financial_storage
 from app.graph.nodes.readonly_agent import readonly_agent_node
 from app.graph.state import AgentState
 
@@ -39,7 +40,7 @@ def is_live_llm_available() -> bool:
 
 pytestmark = pytest.mark.skipif(
     not is_live_llm_available(),
-    reason="Requiere credenciales válidas para el proveedor LLM configurado (Groq, Gemini, NVIDIA, etc.)"
+    reason="Requiere credenciales válidas para el proveedor LLM configurado (Groq, Gemini, NVIDIA, etc.)",
 )
 
 
@@ -53,17 +54,14 @@ def reset_banking_state():
 
 @traceable(name="execute_readonly_eval_step", run_type="chain", tags=["eval", "readonly-agent", "real-llm"])
 def run_readonly_eval(
-    test_name: str,
-    state: AgentState,
-    expected_tools: List[str],
-    user_id: str = "user_default_01"
+    test_name: str, state: AgentState, expected_tools: List[str], user_id: str = "user_default_01"
 ) -> Dict[str, Any]:
     """
     Executes readonly_agent_node with LangSmith trace configuration,
     monitoring tool invocations and recording metrics.
     """
     session_id = state.get("session_id", f"sess_eval_{uuid.uuid4().hex[:8]}")
-    
+
     config, trace_id = build_trace_config(
         session_id=session_id,
         user_id=user_id,
@@ -75,7 +73,7 @@ def run_readonly_eval(
             "expected_tools": expected_tools,
             "provider": settings.llm_provider,
             "model": settings.llm_model,
-        }
+        },
     )
 
     start_time = time.time()
@@ -91,22 +89,18 @@ def run_readonly_eval(
                 run_id=trace_id,
                 key="execution_time_seconds",
                 score=round(elapsed_time, 3),
-                comment=f"Evaluación completada en {elapsed_time:.2f}s"
+                comment=f"Evaluación completada en {elapsed_time:.2f}s",
             )
         except Exception as e:
             logger.debug(f"No se pudo enviar feedback a LangSmith: {e}")
 
-    return {
-        "node_output": result,
-        "trace_id": trace_id,
-        "config": config,
-        "elapsed_seconds": elapsed_time
-    }
+    return {"node_output": result, "trace_id": trace_id, "config": config, "elapsed_seconds": elapsed_time}
 
 
 # ==============================================================================
 # TEST CASES: Mocked PlanStep Task Evaluations
 # ==============================================================================
+
 
 def test_eval_balances_task_calls_only_account_balances():
     """
@@ -122,7 +116,7 @@ def test_eval_balances_task_calls_only_account_balances():
         "title": "Consultar saldos de cuentas",
         "target_node": "readonly_agent",
         "description": "Consultar los saldos actuales de todas las cuentas bancarias asociadas al usuario.",
-        "result": None
+        "result": None,
     }
     state: AgentState = {
         "session_id": "sess_eval_balances_01",
@@ -131,19 +125,22 @@ def test_eval_balances_task_calls_only_account_balances():
         "messages": [],
     }
 
-    with patch.object(financial_storage, "get_account_balances", wraps=financial_storage.get_account_balances) as spy_balances:
-        with patch.object(financial_storage, "get_recent_transactions", wraps=financial_storage.get_recent_transactions) as spy_txs:
+    with patch.object(
+        financial_storage, "get_account_balances", wraps=financial_storage.get_account_balances
+    ) as spy_balances:
+        with patch.object(
+            financial_storage, "get_recent_transactions", wraps=financial_storage.get_recent_transactions
+        ) as spy_txs:
             eval_res = run_readonly_eval(
-                test_name="balances_inquiry",
-                state=state,
-                expected_tools=["get_account_balances"],
-                user_id=user_id
+                test_name="balances_inquiry", state=state, expected_tools=["get_account_balances"], user_id=user_id
             )
 
     output = eval_res["node_output"]
 
     # 1. Verify Tool Calls
-    assert spy_balances.call_count == 1, f"get_account_balances debió llamarse 1 vez, se llamó {spy_balances.call_count}"
+    assert spy_balances.call_count == 1, (
+        f"get_account_balances debió llamarse 1 vez, se llamó {spy_balances.call_count}"
+    )
     assert spy_txs.call_count == 0, f"get_recent_transactions no debió llamarse, se llamó {spy_txs.call_count}"
     assert spy_balances.call_args.kwargs.get("user_id") == user_id
 
@@ -181,7 +178,7 @@ def test_eval_transactions_task_calls_only_recent_transactions():
         "title": "Consultar últimos movimientos bancarios",
         "target_node": "readonly_agent",
         "description": "Obtener y listar los últimos 5 movimientos y compras realizadas por el usuario.",
-        "result": None
+        "result": None,
     }
     state: AgentState = {
         "session_id": "sess_eval_txs_01",
@@ -190,19 +187,25 @@ def test_eval_transactions_task_calls_only_recent_transactions():
         "messages": [],
     }
 
-    with patch.object(financial_storage, "get_account_balances", wraps=financial_storage.get_account_balances) as spy_balances:
-        with patch.object(financial_storage, "get_recent_transactions", wraps=financial_storage.get_recent_transactions) as spy_txs:
+    with patch.object(
+        financial_storage, "get_account_balances", wraps=financial_storage.get_account_balances
+    ) as spy_balances:
+        with patch.object(
+            financial_storage, "get_recent_transactions", wraps=financial_storage.get_recent_transactions
+        ) as spy_txs:
             eval_res = run_readonly_eval(
                 test_name="recent_transactions",
                 state=state,
                 expected_tools=["get_recent_transactions"],
-                user_id=user_id
+                user_id=user_id,
             )
 
     output = eval_res["node_output"]
 
     # 1. Verify Tool Calls
-    assert spy_txs.call_count >= 1, f"get_recent_transactions debió llamarse al menos 1 vez, se llamó {spy_txs.call_count}"
+    assert spy_txs.call_count >= 1, (
+        f"get_recent_transactions debió llamarse al menos 1 vez, se llamó {spy_txs.call_count}"
+    )
     assert spy_balances.call_count == 0, f"get_account_balances no debió llamarse, se llamó {spy_balances.call_count}"
     assert spy_txs.call_args.kwargs.get("user_id") == user_id
 
@@ -212,7 +215,10 @@ def test_eval_transactions_task_calls_only_recent_transactions():
     assert final_text is not None and len(final_text) > 0
 
     # 3. Verify Transaction Content in Response
-    assert any(term in final_text for term in ["Depósito", "Haberes", "Coto", "Supermercado", "Servicios", "tx_01", "tx_02", "350000", "15400"])
+    assert any(
+        term in final_text
+        for term in ["Depósito", "Haberes", "Coto", "Supermercado", "Servicios", "tx_01", "tx_02", "350000", "15400"]
+    )
 
     # 4. Verify Plan Completion
     completed_plan = output["execution_plan"]
@@ -232,7 +238,7 @@ def test_eval_compound_task_calls_both_tools():
         "title": "Auditoría integral de saldos y movimientos",
         "target_node": "readonly_agent",
         "description": "Consultar los saldos disponibles en todas las cuentas y también los últimos movimientos bancarios para conciliar el estado de la cuenta.",
-        "result": None
+        "result": None,
     }
     state: AgentState = {
         "session_id": "sess_eval_compound_01",
@@ -241,13 +247,17 @@ def test_eval_compound_task_calls_both_tools():
         "messages": [],
     }
 
-    with patch.object(financial_storage, "get_account_balances", wraps=financial_storage.get_account_balances) as spy_balances:
-        with patch.object(financial_storage, "get_recent_transactions", wraps=financial_storage.get_recent_transactions) as spy_txs:
+    with patch.object(
+        financial_storage, "get_account_balances", wraps=financial_storage.get_account_balances
+    ) as spy_balances:
+        with patch.object(
+            financial_storage, "get_recent_transactions", wraps=financial_storage.get_recent_transactions
+        ) as spy_txs:
             eval_res = run_readonly_eval(
                 test_name="compound_balances_and_transactions",
                 state=state,
                 expected_tools=["get_account_balances", "get_recent_transactions"],
-                user_id=user_id
+                user_id=user_id,
             )
 
     output = eval_res["node_output"]
@@ -281,22 +291,22 @@ def test_eval_multi_step_plan_completes_only_active_step():
             "title": "Lectura y análisis de comprobante",
             "target_node": "router",
             "description": "Verificar liquidación adjunta",
-            "result": "Comprobante verificado con éxito"
+            "result": "Comprobante verificado con éxito",
         },
         {
             "step_id": 2,
             "title": "Consultar saldo disponible en cuentas",
             "target_node": "readonly_agent",
             "description": "Consultar los saldos disponibles para verificar fondos antes de operar.",
-            "result": None
+            "result": None,
         },
         {
             "step_id": 3,
             "title": "Emitir transferencia bancaria",
             "target_node": "action_agent",
             "description": "Transferir fondos por $25,000 al proveedor",
-            "result": None
-        }
+            "result": None,
+        },
     ]
 
     state: AgentState = {
@@ -306,12 +316,11 @@ def test_eval_multi_step_plan_completes_only_active_step():
         "messages": [],
     }
 
-    with patch.object(financial_storage, "get_account_balances", wraps=financial_storage.get_account_balances) as spy_balances:
+    with patch.object(
+        financial_storage, "get_account_balances", wraps=financial_storage.get_account_balances
+    ) as spy_balances:
         eval_res = run_readonly_eval(
-            test_name="multistep_active_step_2",
-            state=state,
-            expected_tools=["get_account_balances"],
-            user_id=user_id
+            test_name="multistep_active_step_2", state=state, expected_tools=["get_account_balances"], user_id=user_id
         )
 
     output = eval_res["node_output"]
@@ -346,13 +355,14 @@ def test_eval_langsmith_telemetry_and_config_propagation():
 
     # Seed an account for user_auditor_99 to verify data isolation
     from mcp_financial_action_server.storage import AccountRecord
+
     financial_storage.accounts["acc_audit_01"] = AccountRecord(
         account_id="acc_audit_01",
         owner_id=user_id,
         owner_name="Auditor General",
         account_number="CA-9999-ARS",
         balance=75000.0,
-        currency="ARS"
+        currency="ARS",
     )
 
     mocked_step = {
@@ -360,7 +370,7 @@ def test_eval_langsmith_telemetry_and_config_propagation():
         "title": "Verificación de saldos auditor",
         "target_node": "readonly_agent",
         "description": "Consultar saldos de cuentas para auditoría de seguridad.",
-        "result": None
+        "result": None,
     }
     state: AgentState = {
         "session_id": session_id,
@@ -375,7 +385,7 @@ def test_eval_langsmith_telemetry_and_config_propagation():
         endpoint="test_telemetry_propagation",
         run_name="eval_telemetry_propagation",
         extra_tags=["eval", "telemetry-check"],
-        extra_metadata={"audit_purpose": "langsmith_verification"}
+        extra_metadata={"audit_purpose": "langsmith_verification"},
     )
 
     # Validate trace config structure
@@ -386,7 +396,9 @@ def test_eval_langsmith_telemetry_and_config_propagation():
     assert config["metadata"]["trace_id"] == trace_id
 
     # Execute with explicit config
-    with patch.object(financial_storage, "get_account_balances", wraps=financial_storage.get_account_balances) as spy_balances:
+    with patch.object(
+        financial_storage, "get_account_balances", wraps=financial_storage.get_account_balances
+    ) as spy_balances:
         output = readonly_agent_node(state, config=config)
 
     assert output["status"] == "COMPLETED"
@@ -429,5 +441,5 @@ if __name__ == "__main__":
             print(f"❌ FAILED ({duration:.2f}s): {exc}")
 
     print("\n" + "=" * 80)
-    print(f"📊 Resumen de Evaluaciones: {passed}/{total} pruebas superadas ({(passed/total)*100:.1f}%)")
+    print(f"📊 Resumen de Evaluaciones: {passed}/{total} pruebas superadas ({(passed / total) * 100:.1f}%)")
     print("=" * 80)

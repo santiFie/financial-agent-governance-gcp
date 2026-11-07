@@ -1,16 +1,18 @@
 """
 Unit tests for critical financial action tools.
 """
+
 import pytest
-from mcp_financial_action_server.storage import financial_storage
+
 from mcp_financial_action_server.server import (
-    execute_bank_transfer,
-    register_destination_account,
-    schedule_direct_debit,
     cancel_scheduled_debit,
+    execute_bank_transfer,
     get_account_balances,
     get_recent_transactions,
+    register_destination_account,
+    schedule_direct_debit,
 )
+from mcp_financial_action_server.storage import financial_storage
 
 
 @pytest.fixture(autouse=True)
@@ -300,9 +302,13 @@ def test_read_tools_return_balances_and_seeded_history():
 
 def test_read_tools_reflect_executed_transfers():
     execute_bank_transfer(
-        user_id="user_default_01", source_account_id="acc_001",
-        destination_cbu_or_alias="0170099220000067891234", amount=1000.0,
-        currency="ARS", concept="TEST", idempotency_key="read-after-write-1",
+        user_id="user_default_01",
+        source_account_id="acc_001",
+        destination_cbu_or_alias="0170099220000067891234",
+        amount=1000.0,
+        currency="ARS",
+        concept="TEST",
+        idempotency_key="read-after-write-1",
     )
 
     balances = {a["account_id"]: a["balance"] for a in get_account_balances(user_id="user_default_01")["accounts"]}

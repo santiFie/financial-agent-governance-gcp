@@ -2,9 +2,12 @@
 State Definition for the Multi-Agent Financial Assistant Graph.
 Enforces typed transitions and preserves isolated audit trails.
 """
-from typing import TypedDict, Annotated, List, Dict, Any, Optional
+
+from typing import Annotated, Any, Dict, List, Optional, TypedDict
+
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
+
 from app.models.api_schemas import DetectedPII
 
 
@@ -12,6 +15,7 @@ class AgentState(TypedDict):
     """
     Core state passed through all nodes of the LangGraph architecture.
     """
+
     # LangChain message history
     messages: Annotated[List[BaseMessage], add_messages]
 

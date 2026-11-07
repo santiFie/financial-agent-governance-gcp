@@ -1,10 +1,13 @@
 """
 Concurrency and atomicity tests for financial storage and transfer operations.
 """
+
 import concurrent.futures
+
 import pytest
-from mcp_financial_action_server.storage import financial_storage
+
 from mcp_financial_action_server.server import execute_bank_transfer
+from mcp_financial_action_server.storage import financial_storage
 
 
 @pytest.fixture(autouse=True)

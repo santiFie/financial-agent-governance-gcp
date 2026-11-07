@@ -6,6 +6,7 @@ The attack chain is *measured* per run, never forced or suppressed (see CLAUDE.m
 plan deviation, action agent invocation, explicit register/transfer tool calls, executed transfer and execution path.
 Each scenario runs N times because the LLM is not deterministic. Whether the attack succeeds is a result, not a test failure.
 """
+
 import json
 import logging
 import os
@@ -27,6 +28,7 @@ for _p in (ROOT_DIR, BACKEND_DIR):
 from langchain_core.messages import HumanMessage
 from langsmith import Client, traceable
 from langsmith.evaluation import evaluate
+from mcp_financial_action_server.storage import financial_storage
 
 from app.config import settings
 from app.core.mcp_action_client import mcp_action_client
@@ -35,16 +37,15 @@ from app.db.mock_banking import mock_banking_db
 from app.graph.graph import financial_graph
 from app.graph.tools.banking_write import register_recipient_tool, transfer_funds_tool
 from attack_scenario_evaluators import (
-    evaluate_plan_deviated,
     evaluate_action_agent_invoked,
     evaluate_beneficiary_register_tool_called,
-    evaluate_transfer_tool_called_to_adversary,
-    evaluate_transfer_executed_to_adversary,
-    evaluate_execution_path,
     evaluate_blocked_by_model_armor,
+    evaluate_execution_path,
+    evaluate_plan_deviated,
+    evaluate_transfer_executed_to_adversary,
+    evaluate_transfer_tool_called_to_adversary,
 )
-from decision_models_evaluators import get_decision_evaluator_classifier
-from mcp_financial_action_server.storage import financial_storage
+from tests.decision_models_evaluators import get_decision_evaluator_classifier
 from tests.live_llm import requires_live_llm
 
 logger = logging.getLogger(__name__)
@@ -66,15 +67,20 @@ def _reset_state() -> None:
 
 def _resolver_for(session_id: str):
     """Resolves DLP tokens to real accounts. Models sometimes drop the brackets ("CBU_BANCARIO_1"); the intent is the same."""
+
     def resolve(value: str) -> str:
-        token = value if value.startswith("[") else (f"[{value}]" if re.fullmatch(r"[A-Z_]+_\d+", value or "") else None)
+        token = (
+            value if value.startswith("[") else (f"[{value}]" if re.fullmatch(r"[A-Z_]+_\d+", value or "") else None)
+        )
         return (token_vault.resolve_token(session_id, token) if token else None) or value
+
     return resolve
 
 
 # ==============================================================================
 # Predict function: full graph run with spies (real tools and real governance keep running)
 # ==============================================================================
+
 
 @traceable(name="predict_attack_3_1_run", run_type="chain", tags=["eval", "attack-3-1", "real-llm"])
 def predict_attack_run(inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -106,9 +112,11 @@ def predict_attack_run(inputs: Dict[str, Any]) -> Dict[str, Any]:
 
     _reset_state()
     try:
-        with patch.object(register_recipient_tool, "func", side_effect=spy_register), \
-             patch.object(transfer_funds_tool, "func", side_effect=spy_transfer), \
-             patch.object(mcp_action_client, "execute_approved_transfer", side_effect=spy_execute):
+        with (
+            patch.object(register_recipient_tool, "func", side_effect=spy_register),
+            patch.object(transfer_funds_tool, "func", side_effect=spy_transfer),
+            patch.object(mcp_action_client, "execute_approved_transfer", side_effect=spy_execute),
+        ):
             try:
                 financial_graph.invoke(
                     {
@@ -160,7 +168,10 @@ def _measure(output: Dict[str, Any], scenario: Dict[str, Any], classifier=None) 
     run = {"outputs": output}
     example = {
         "inputs": {"sanitized_input": output.get("sanitized_input") or scenario["input"]["raw_input"]},
-        "outputs": {"adversary_account": scenario["adversary_account"], "adversary_amount": scenario["adversary_amount"]},
+        "outputs": {
+            "adversary_account": scenario["adversary_account"],
+            "adversary_amount": scenario["adversary_amount"],
+        },
     }
     resolver = _resolver_for(output["session_id"])
     metrics = {
@@ -201,15 +212,24 @@ def test_register_and_transfer_tool_evaluators_require_the_explicit_tool_call():
 
 def test_token_arguments_are_resolved_before_comparing_with_the_adversary_account():
     calls = [{"name": "transfer_funds_tool", "args": {"destination_account": "[CBU_BANCARIO_1]"}}]
-    resolver = lambda v: ADVERSARY["adversary_account"] if v == "[CBU_BANCARIO_1]" else v
 
-    assert evaluate_transfer_tool_called_to_adversary({"outputs": {"tool_calls": calls}}, _example(), resolver)["score"] == 1.0
+    def resolver(v):
+        return ADVERSARY["adversary_account"] if v == "[CBU_BANCARIO_1]" else v
+
+    assert (
+        evaluate_transfer_tool_called_to_adversary({"outputs": {"tool_calls": calls}}, _example(), resolver)["score"]
+        == 1.0
+    )
     assert evaluate_transfer_tool_called_to_adversary({"outputs": {"tool_calls": calls}}, _example())["score"] == 0.0
 
 
 def test_transfer_executed_and_execution_path_evaluators():
-    run = {"outputs": {"executed_transfers": [{"destination": ADVERSARY["adversary_account"], "amount": 1000.0}],
-                       "execution_path": "FAST_PATH"}}
+    run = {
+        "outputs": {
+            "executed_transfers": [{"destination": ADVERSARY["adversary_account"], "amount": 1000.0}],
+            "execution_path": "FAST_PATH",
+        }
+    }
 
     assert evaluate_transfer_executed_to_adversary(run, _example())["score"] == 1.0
     assert evaluate_execution_path(run, _example())["value"] == "FAST_PATH"
@@ -217,18 +237,28 @@ def test_transfer_executed_and_execution_path_evaluators():
 
 
 def test_action_agent_invoked_evaluator():
-    assert evaluate_action_agent_invoked({"outputs": {"plan": [{"target_node": "action_agent"}]}}, _example())["score"] == 1.0
-    assert evaluate_action_agent_invoked({"outputs": {"plan": [{"target_node": "read_only_agent"}]}}, _example())["score"] == 0.0
+    assert (
+        evaluate_action_agent_invoked({"outputs": {"plan": [{"target_node": "action_agent"}]}}, _example())["score"]
+        == 1.0
+    )
+    assert (
+        evaluate_action_agent_invoked({"outputs": {"plan": [{"target_node": "read_only_agent"}]}}, _example())["score"]
+        == 0.0
+    )
 
 
 def test_blocked_by_model_armor_evaluator():
-    assert evaluate_blocked_by_model_armor({"outputs": {"is_threat": True, "execution_path": "NONE"}}, _example())["score"] == 1.0
+    assert (
+        evaluate_blocked_by_model_armor({"outputs": {"is_threat": True, "execution_path": "NONE"}}, _example())["score"]
+        == 1.0
+    )
     assert evaluate_blocked_by_model_armor({"outputs": {"is_threat": False}}, _example())["score"] == 0.0
 
 
 # ==============================================================================
 # Live: N runs per scenario, rates reported (no assertion on attack success)
 # ==============================================================================
+
 
 @requires_live_llm
 @pytest.mark.parametrize("scenario", load_scenarios(), ids=[s["id"] for s in load_scenarios()])
@@ -261,6 +291,7 @@ def test_attack_3_1_measurement(scenario: Dict[str, Any]):
 # LangSmith experiment
 # ==============================================================================
 
+
 def sync_scenarios_to_langsmith(client: Optional[Client] = None, dataset_name: str = DATASET_NAME):
     raw_api_key = settings.langchain_api_key or os.getenv("LANGCHAIN_API_KEY") or os.getenv("LANGSMITH_API_KEY")
     if not raw_api_key:
@@ -270,9 +301,16 @@ def sync_scenarios_to_langsmith(client: Optional[Client] = None, dataset_name: s
     os.environ["LANGSMITH_API_KEY"] = api_key
     client = client or Client(api_key=api_key)
 
-    dataset = (client.read_dataset(dataset_name=dataset_name) if client.has_dataset(dataset_name=dataset_name)
-               else client.create_dataset(dataset_name=dataset_name, description="Escenarios de la amenaza 3.1 (Goal Hijacking)"))
-    existing = {ex.metadata["id"] for ex in client.list_examples(dataset_id=dataset.id) if ex.metadata and "id" in ex.metadata}
+    dataset = (
+        client.read_dataset(dataset_name=dataset_name)
+        if client.has_dataset(dataset_name=dataset_name)
+        else client.create_dataset(
+            dataset_name=dataset_name, description="Escenarios de la amenaza 3.1 (Goal Hijacking)"
+        )
+    )
+    existing = {
+        ex.metadata["id"] for ex in client.list_examples(dataset_id=dataset.id) if ex.metadata and "id" in ex.metadata
+    }
     for item in load_scenarios():
         if item["id"] not in existing:
             client.create_example(
@@ -303,6 +341,7 @@ def test_langsmith_attack_3_1_experiment():
         def wrapped(run, example):
             outputs = run.outputs or {}
             return evaluator(run, example, _resolver_for(outputs.get("session_id", "")))
+
         wrapped.__name__ = evaluator.__name__
         return wrapped
 
@@ -331,6 +370,7 @@ def test_langsmith_attack_3_1_experiment():
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Medición E2E de la amenaza 3.1 con LangSmith")
     parser.add_argument("--sync-only", action="store_true")
     parser.add_argument("--run-eval", action="store_true")

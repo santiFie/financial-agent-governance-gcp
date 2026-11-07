@@ -2,10 +2,13 @@
 Unit and integration tests for Telemetry, Tracing and Observability.
 Verifies config generation, metadata enrichment, trace ID propagation and health endpoints.
 """
+
 import uuid
+
 from fastapi.testclient import TestClient
-from app.main import app
+
 from app.core.telemetry import build_trace_config, get_telemetry_status
+from app.main import app
 from tests.live_llm import requires_live_llm
 
 client = TestClient(app)
@@ -23,7 +26,7 @@ def test_build_trace_config_structure():
         endpoint=endpoint,
         run_name="custom_run_name",
         extra_metadata={"custom_key": "custom_val"},
-        extra_tags=["custom-tag"]
+        extra_tags=["custom-tag"],
     )
 
     # Validate trace_id is valid UUID
@@ -69,11 +72,10 @@ def test_health_endpoint_exposes_telemetry():
 @requires_live_llm
 def test_chat_endpoint_populates_trace_id_in_audit():
     """Validates /api/chat returns trace_id in SecurityMetadata."""
-    response = client.post("/api/chat", json={
-        "message": "Hola, ¿cómo estás?",
-        "session_id": "test_telemetry_session",
-        "user_id": "user_test_trace"
-    })
+    response = client.post(
+        "/api/chat",
+        json={"message": "Hola, ¿cómo estás?", "session_id": "test_telemetry_session", "user_id": "user_test_trace"},
+    )
     assert response.status_code == 200
     data = response.json()
     assert "security_audit" in data

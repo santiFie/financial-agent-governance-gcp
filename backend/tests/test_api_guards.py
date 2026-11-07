@@ -1,11 +1,12 @@
 """Offline tests for /api/chat error propagation and /api/approve transaction validation."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.db.mock_banking import mock_banking_db
+from app.main import app
 
 client = TestClient(app)
 
@@ -18,9 +19,15 @@ def clean_queue():
 
 
 def _approve(session_id, tx_id):
-    return client.post("/api/approve", json={
-        "session_id": session_id, "transaction_id": tx_id, "decision": "APPROVED", "admin_user": "oficial",
-    })
+    return client.post(
+        "/api/approve",
+        json={
+            "session_id": session_id,
+            "transaction_id": tx_id,
+            "decision": "APPROVED",
+            "admin_user": "oficial",
+        },
+    )
 
 
 def test_chat_returns_500_when_graph_raises():
@@ -31,10 +38,13 @@ def test_chat_returns_500_when_graph_raises():
     assert "boom" in resp.json()["detail"]
 
 
-@pytest.mark.parametrize("tx_session, request_tx", [
-    ("s_other", "tx_pending_ok"),    # staged in another session
-    ("s_paused", "tx_pending_nope"),  # unknown transaction id
-])
+@pytest.mark.parametrize(
+    "tx_session, request_tx",
+    [
+        ("s_other", "tx_pending_ok"),  # staged in another session
+        ("s_paused", "tx_pending_nope"),  # unknown transaction id
+    ],
+)
 def test_approve_rejects_transaction_not_pending_in_session(tx_session, request_tx):
     staged = mock_banking_db.stage_transfer(tx_session, "user_x", 100.0, "acc_001", "[CBU_BANCARIO_1]")
     mock_banking_db.pending_transfers["tx_pending_ok"] = {**staged, "transaction_id": "tx_pending_ok"}

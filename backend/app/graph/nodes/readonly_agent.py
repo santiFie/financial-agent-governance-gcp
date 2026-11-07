@@ -1,14 +1,15 @@
 import logging
-from typing import Dict, Any, Optional
-from langchain_core.messages import HumanMessage, AIMessage
+from typing import Any, Dict, Optional
+
+from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.prebuilt import create_react_agent
 
-from app.graph.state import AgentState
-from app.graph.plan_utils import get_active_step, complete_active_step
-from app.graph.tools.banking_read import get_account_balances, get_recent_transactions
 from app.core.llm import get_chat_model
 from app.core.prompt_manager import prompt_manager
+from app.graph.plan_utils import complete_active_step, get_active_step
+from app.graph.state import AgentState
+from app.graph.tools.banking_read import get_account_balances, get_recent_transactions
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +37,14 @@ def readonly_agent_node(state: AgentState, config: Optional[RunnableConfig] = No
     """
     user_id = state.get("user_id", "user_default_01")
     active_step = get_active_step(state)
-    
+
     task_description = (
         active_step.get("description")
         if isinstance(active_step, dict)
         else state.get("sanitized_input", "No se pudo obtener la descripción de la tarea")
     )
 
-    system_prompt = prompt_manager.render('readonly_agent', user_id=user_id)
+    system_prompt = prompt_manager.render("readonly_agent", user_id=user_id)
 
     # Combinar RunnableConfig entrante con configurable.user_id para preservar trazabilidad
     exec_config = dict(config) if config else {}
@@ -52,13 +53,8 @@ def readonly_agent_node(state: AgentState, config: Optional[RunnableConfig] = No
     exec_config["configurable"] = configurable
 
     result = _build_executor().invoke(
-        {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": task_description}
-            ]
-        },
-        config=exec_config
+        {"messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": task_description}]},
+        config=exec_config,
     )
 
     # El último mensaje devuelto por el sub-agente es la síntesis final

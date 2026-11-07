@@ -5,15 +5,17 @@ de-identification on the user input before passing data into downstream nodes.
 Attached documents are NOT read here: the Orchestrator reads them on demand through
 read_document_tool, which applies the same Model Armor + DLP pipeline.
 """
+
 import logging
-from typing import Dict, Any
+from typing import Any, Dict
+
 from langchain_core.messages import AIMessage, RemoveMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
-from app.graph.state import AgentState
 from app.core.dlp_sanitizer import dlp_sanitizer
 from app.core.model_armor import model_armor
 from app.core.prompt_manager import prompt_manager
+from app.graph.state import AgentState
 
 logger = logging.getLogger(__name__)
 

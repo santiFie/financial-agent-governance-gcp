@@ -8,19 +8,21 @@ Implements:
 4. evaluate_non_empty_response: Deterministic evaluator for response presence.
 5. evaluate_tool_calls_match: Deterministic evaluator comparing executed tool calls with ground truth.
 """
-import os
+
 import json
 import logging
-from typing import Dict, Any, List, Optional, Union
+import os
+from typing import Any, Dict, List, Optional
+
 from dotenv import load_dotenv
-from pydantic import SecretStr
 from langchain_typesafe import (
-    TypeSafeClassifier,
+    ClassifierResponse,
     Noul,
     NoulCriteria,
     Question,
-    ClassifierResponse,
+    TypeSafeClassifier,
 )
+from pydantic import SecretStr
 
 load_dotenv()
 
@@ -38,10 +40,7 @@ def get_decision_evaluator_classifier(
 ) -> TypeSafeClassifier:
     """Instancia el cliente TypeSafeClassifier para los evaluadores de decisión."""
     resolved_base_url = (base_url or OPENROUTER_BASE_URL).rstrip("/")
-    resolved_api_key = (
-        api_key
-        or os.getenv("OPENROUTER_API_KEY")
-    )
+    resolved_api_key = api_key or os.getenv("OPENROUTER_API_KEY")
 
     if not resolved_api_key:
         raise RuntimeError("No API Key for decision model")
@@ -96,6 +95,7 @@ CONTENT_PRESENCE_QUESTIONS: dict[str, Question] = {
 # Helper to extract outputs/inputs from run and example (supporting both SDK and dict)
 # ==============================================================================
 
+
 def _get_run_outputs(run: Any) -> Dict[str, Any]:
     if hasattr(run, "outputs") and run.outputs is not None:
         return run.outputs if isinstance(run.outputs, dict) else {"output": run.outputs}
@@ -124,6 +124,7 @@ def _get_example_inputs(example: Any) -> Dict[str, Any]:
 # Métrica 1: Respuesta NO vacía (Determinista)
 # ==============================================================================
 
+
 def evaluate_non_empty_response(run: Any, example: Any) -> Dict[str, Any]:
     """
     Métrica determinista 1:
@@ -150,6 +151,7 @@ def evaluate_non_empty_response(run: Any, example: Any) -> Dict[str, Any]:
 # ==============================================================================
 # Métrica 2: Tool Calls Coincidentes con Ground Truth (Determinista)
 # ==============================================================================
+
 
 def evaluate_tool_calls_match(run: Any, example: Any) -> Dict[str, Any]:
     """
@@ -197,8 +199,7 @@ def evaluate_tool_calls_match(run: Any, example: Any) -> Dict[str, Any]:
                 "key": "tool_calls_match",
                 "score": 0.0,
                 "comment": (
-                    f"Fallo en herramienta #{i+1}: esperada '{exp_name}', "
-                    f"pero el agente ejecutó '{act_name}'."
+                    f"Fallo en herramienta #{i + 1}: esperada '{exp_name}', pero el agente ejecutó '{act_name}'."
                 ),
             }
 
@@ -220,16 +221,10 @@ def evaluate_tool_calls_match(run: Any, example: Any) -> Dict[str, Any]:
                 }
 
             exp_dest = str(
-                exp_args.get("destination_account")
-                or exp_args.get("destination")
-                or exp_args.get("target_token")
-                or ""
+                exp_args.get("destination_account") or exp_args.get("destination") or exp_args.get("target_token") or ""
             ).strip()
             act_dest = str(
-                act_args.get("destination_account")
-                or act_args.get("destination")
-                or act_args.get("target_token")
-                or ""
+                act_args.get("destination_account") or act_args.get("destination") or act_args.get("target_token") or ""
             ).strip()
             if exp_dest and exp_dest != act_dest:
                 return {
@@ -265,6 +260,7 @@ def evaluate_tool_calls_match(run: Any, example: Any) -> Dict[str, Any]:
 # Métrica 3: Presencia Semántica de Contenido via Decision Model (NO determinista)
 # ==============================================================================
 
+
 def evaluate_output_content_presence(
     run: Any,
     example: Any,
@@ -281,16 +277,16 @@ def evaluate_output_content_presence(
 
     # Extraer el texto producido por el agente
     agent_output = (
-        outputs.get("output_text")
-        or outputs.get("final_response")
-        or json.dumps(outputs, ensure_ascii=False)
+        outputs.get("output_text") or outputs.get("final_response") or json.dumps(outputs, ensure_ascii=False)
     )
 
     # Extraer el contenido esperado del ground truth
     expected_content = expected.get("expected_output_content") or expected.get("content") or []
 
     # Extraer información del PlanStep para contexto
-    plan_step = inputs.get("plan_step") or (inputs.get("execution_plan", [{}])[0] if inputs.get("execution_plan") else {})
+    plan_step = inputs.get("plan_step") or (
+        inputs.get("execution_plan", [{}])[0] if inputs.get("execution_plan") else {}
+    )
     step_title = plan_step.get("title", "")
     step_desc = plan_step.get("description", "")
 
@@ -316,10 +312,12 @@ Descripción del paso: {step_desc}
         classifier = get_decision_evaluator_classifier()
 
     try:
-        response: ClassifierResponse = classifier.invoke({
-            "state": state_context,
-            "questions": CONTENT_PRESENCE_QUESTIONS,
-        })
+        response: ClassifierResponse = classifier.invoke(
+            {
+                "state": state_context,
+                "questions": CONTENT_PRESENCE_QUESTIONS,
+            }
+        )
         noul_answer = response.nouls.get("output_content_presence")
         if noul_answer is not None:
             score = float(noul_answer.noul)
@@ -445,10 +443,12 @@ def evaluate_plan_grounded_in_request(
         classifier = get_decision_evaluator_classifier()
 
     try:
-        response: ClassifierResponse = classifier.invoke({
-            "state": state_context,
-            "questions": PLAN_GROUNDED_QUESTIONS,
-        })
+        response: ClassifierResponse = classifier.invoke(
+            {
+                "state": state_context,
+                "questions": PLAN_GROUNDED_QUESTIONS,
+            }
+        )
         answer = response.nouls.get("plan_grounded_in_request")
         score = float(answer.noul) if answer is not None else 0.0
         return {

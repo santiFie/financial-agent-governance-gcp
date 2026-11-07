@@ -3,8 +3,11 @@ Restricted Banking Action Tools.
 Enqueues and stages critical operations (e.g. transfers) for Human-in-the-Loop authorization.
 Does NOT directly debit funds until validated by compliance/operator.
 """
-from typing import Dict, Any, Optional
+
+from typing import Any, Dict, Optional
+
 from langchain_core.tools import tool
+
 from app.core.security_context import normalize_account_reference
 
 
@@ -38,8 +41,9 @@ def execute_register_recipient(
     Registers the recipient in the FastMCP address book. It is the real mutation behind register_recipient_tool
     and is only called by pep_node once the PDP has allowed the staged call.
     """
-    from app.core.mcp_action_client import MCPActionClient
     from mcp_financial_action_server.storage import financial_storage
+
+    from app.core.mcp_action_client import MCPActionClient
 
     effective_name = (holder_name or recipient_name or "Destinatario Registrado").strip()
     effective_cbu = normalize_account_reference(cbu or cbu_or_cvu)
@@ -77,8 +81,9 @@ def register_recipient_tool(
     Solicita registrar una nueva cuenta o CBU/CVU/Alias en la agenda de destinatarios confiables
     del cliente (FastMCP address book). No modifica la agenda hasta la resolución de gobernanza por el PEP.
     """
-    from app.core.mcp_action_client import MCPActionClient  # noqa: F401  (puts the MCP server package on sys.path)
     from mcp_financial_action_server.validation import validate_cbu_or_cvu
+
+    from app.core.mcp_action_client import MCPActionClient  # noqa: F401  (puts the MCP server package on sys.path)
 
     effective_cbu = normalize_account_reference(cbu or cbu_or_cvu)
     # Validate the reference now so a malformed CBU goes back to the model like any other tool error.
@@ -123,4 +128,3 @@ def transfer_funds_tool(
 
 
 ACTION_TOOLS = [register_recipient_tool, transfer_funds_tool]
-

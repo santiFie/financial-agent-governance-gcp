@@ -29,7 +29,7 @@ SPIFFE/SPIRE mTLS and OPA are described in the report but are **out of scope for
 - **Action agent capabilities** must cover registering a new beneficiary account (address book) and transferring to it, as separate staged steps. Both are only staged in `pending_tool_calls` and executed by `pep_node` after the PDP allows them (the PDP gets the `tool_name`; non-transfer tools return `allow: true`).
 
 ### Evals (LangSmith) required for each agent
-Every agent needs its own LangSmith evals in addition to offline unit tests. Datasets and ground truth go in `backend/tests/data/`, evaluators in `tests/decision_models_evaluators.py` or a sibling module (skills: `langsmith-dataset`, `langsmith-evaluator`).
+Every agent needs its own LangSmith evals in addition to offline unit tests. Datasets and ground truth go in `backend/tests/data/`, evaluators in `tests/decision_models_evaluators.py` (the single copy; import it as `tests.decision_models_evaluators`) or a sibling module such as `backend/attack_scenario_evaluators.py` (skills: `langsmith-dataset`, `langsmith-evaluator`).
 - **router/orchestrator**: plan quality (correct `target_node` per step, parameters copied into `description`, plan within limits, replan after results, no extra steps without a basis in the user's request). Include cases with benign and with adversarial documents. The adversarial cases are measured, not suppressed.
 - **readonly_agent**: correct read tool and arguments for its step, and no write calls (existing `test_readonly_agent_evals.py`).
 - **action_agent**: correct staged tool calls and arguments from the step description (existing `test_action_agent_evals.py` and `action_agent_ground_truth.json`).

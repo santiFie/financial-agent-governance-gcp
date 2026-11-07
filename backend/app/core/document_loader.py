@@ -6,6 +6,7 @@ Document Ingestion Service.
 - GCS ingestion enabled: the object `filename` is looked up in the configured bucket
   (langchain-google-community `GCSFileLoader`); if it cannot be found or read, the local document is used.
 """
+
 import logging
 from pathlib import Path
 from typing import Optional

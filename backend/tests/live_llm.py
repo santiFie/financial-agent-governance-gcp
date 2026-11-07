@@ -1,4 +1,5 @@
 """Marker for integration tests that call a real LLM through the full graph."""
+
 import pytest
 
 from app.core.llm import get_chat_model

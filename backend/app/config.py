@@ -2,8 +2,10 @@
 Configuration module for the Financial Assistant Defense-in-Depth System.
 Uses pydantic-settings to manage environment variables with strong typing.
 """
+
 import os
 from typing import Literal, Optional
+
 from dotenv import load_dotenv
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -36,7 +38,9 @@ class Settings(BaseSettings):
     llm_model: Optional[str] = "openai/gpt-oss-120b"
     # Orchestrator model override. When unset, the orchestrator uses the same provider/model as the executor agents.
     # Attack success depends on the model: see docs/modelos_probados.md.
-    orchestrator_provider: Optional[Literal["litellm", "groq", "nvidia", "vertexai", "openrouter", "google_genai"]] = None
+    orchestrator_provider: Optional[Literal["litellm", "groq", "nvidia", "vertexai", "openrouter", "google_genai"]] = (
+        None
+    )
     orchestrator_model: Optional[str] = None
     groq_model: str = "openai/gpt-oss-120b"
     nvidia_model: str = "nvidia/nemotron-3.5-super-vl-120b-a12b"
@@ -85,13 +89,21 @@ class Settings(BaseSettings):
     model_armor_template_id: Optional[str] = Field(default=None, description="GCP Model Armor template ID")
 
     # Policy Enforcement Point (PEP) & Policy Decision Point (PDP) Configuration
-    pdp_url: str = Field(default="http://localhost:8181/v1/data/transaction/decision", description="Policy Decision Point URL")
+    pdp_url: str = Field(
+        default="http://localhost:8181/v1/data/transaction/decision", description="Policy Decision Point URL"
+    )
     pdp_timeout_seconds: float = Field(default=3.0, description="PDP request timeout in seconds")
-    pdp_fallback_mode: str = Field(default="deny", description="PDP fallback behavior on timeout/failure: 'deny' (FAILED) or 'hitl'")
+    pdp_fallback_mode: str = Field(
+        default="deny", description="PDP fallback behavior on timeout/failure: 'deny' (FAILED) or 'hitl'"
+    )
 
     # Orchestrator Agent safety limits
-    orchestrator_max_plan_steps: int = Field(default=8, description="Maximum number of steps an execution plan may contain")
-    orchestrator_max_tool_iterations: int = Field(default=3, description="Maximum consecutive Orchestrator tool rounds before a plan update")
+    orchestrator_max_plan_steps: int = Field(
+        default=8, description="Maximum number of steps an execution plan may contain"
+    )
+    orchestrator_max_tool_iterations: int = Field(
+        default=3, description="Maximum consecutive Orchestrator tool rounds before a plan update"
+    )
 
     @model_validator(mode="after")
     def _require_own_vault_secret_in_production(self):
@@ -99,11 +111,7 @@ class Settings(BaseSettings):
             raise ValueError("TOKEN_VAULT_SECRET debe definirse con un valor propio cuando ENVIRONMENT=production.")
         return self
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
 settings = Settings()

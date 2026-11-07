@@ -4,9 +4,11 @@ Configures dynamic fallbacks in the order: groq -> nvidia -> vertexai -> openrou
 Verifies API keys and GCP parameters before including each provider in the fallback chain.
 Fails fast with LLMConfigurationError if no provider has valid credentials.
 """
-import os
+
 import logging
-from typing import Dict, Any, List, Optional
+import os
+from typing import Any, Dict, List, Optional
+
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from app.config import settings
@@ -76,6 +78,7 @@ def _check_vertexai_deployment(temperature: float, model: Optional[str] = None) 
         try:
             import google.auth
             from google.auth.exceptions import DefaultCredentialsError
+
             try:
                 creds, auth_project = google.auth.default()
                 if creds:
@@ -200,12 +203,11 @@ def get_chat_model(
     fallbacks = [{primary_name: fallback_targets}] if fallback_targets else None
 
     logger.info(
-        f"[LLM Factory] LiteLLM Router inicializado con primario='{primary_name}' "
-        f"y fallbacks={fallback_targets}"
+        f"[LLM Factory] LiteLLM Router inicializado con primario='{primary_name}' y fallbacks={fallback_targets}"
     )
 
-    from litellm import Router
     from langchain_litellm import ChatLiteLLMRouter
+    from litellm import Router
 
     router = Router(
         model_list=model_list,

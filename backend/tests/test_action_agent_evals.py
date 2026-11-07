@@ -10,11 +10,12 @@ Validates 3 core metrics:
 Also verifies state mutation in FinancialStorage using get_accounts_by_user_id.
 Syncs ground truth to LangSmith datasets and runs evaluation experiments.
 """
+
+import json
+import logging
 import os
 import sys
-import json
 import uuid
-import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,27 +27,24 @@ if str(ROOT_DIR) not in sys.path:
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from typing import Dict, Any, List, Optional
-from unittest.mock import patch, MagicMock
-import pytest
+from typing import Any, Dict, List, Optional
+from unittest.mock import MagicMock, patch
 
+import pytest
 from langsmith import Client, traceable
 from langsmith.evaluation import evaluate
-from langchain_core.messages import AIMessage
+from mcp_financial_action_server.storage import AccountRecord, financial_storage
 
 from app.config import settings
 from app.core.llm import get_chat_model
 from app.graph.nodes.action_agent import action_agent_node
-from app.graph.tools.banking_write import register_recipient_tool, transfer_funds_tool
 from app.graph.state import AgentState
-from mcp_financial_action_server.storage import financial_storage, AccountRecord
-
-from decision_models_evaluators import (
-    get_decision_evaluator_classifier,
+from app.graph.tools.banking_write import register_recipient_tool, transfer_funds_tool
+from tests.decision_models_evaluators import (
     evaluate_non_empty_response,
-    evaluate_tool_calls_match,
     evaluate_output_content_presence,
-    CONTENT_PRESENCE_QUESTIONS,
+    evaluate_tool_calls_match,
+    get_decision_evaluator_classifier,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,6 +73,7 @@ def load_ground_truth_data() -> List[Dict[str, Any]]:
 # ==============================================================================
 # Tool Mocking Helpers & State Validation
 # ==============================================================================
+
 
 def mock_register_recipient_func(*args: Any, **kwargs: Any) -> Dict[str, Any]:
     """
@@ -143,6 +142,7 @@ def mock_transfer_funds_func(*args: Any, **kwargs: Any) -> Dict[str, Any]:
 # Predict Function for Action Agent
 # ==============================================================================
 
+
 @traceable(name="predict_action_agent", run_type="chain", tags=["eval", "action-agent", "real-llm"])
 def predict_action_agent(inputs: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -171,8 +171,10 @@ def predict_action_agent(inputs: Dict[str, Any]) -> Dict[str, Any]:
         recorded_tool_calls.append({"name": "transfer_funds_tool", "args": dict(kwargs)})
         return mock_transfer_funds_func(*args, **kwargs)
 
-    with patch.object(register_recipient_tool, "func", side_effect=spy_register_func), \
-         patch.object(transfer_funds_tool, "func", side_effect=spy_transfer_func):
+    with (
+        patch.object(register_recipient_tool, "func", side_effect=spy_register_func),
+        patch.object(transfer_funds_tool, "func", side_effect=spy_transfer_func),
+    ):
         result = action_agent_node(state)
 
     # Output text synthesized by the agent
@@ -196,6 +198,7 @@ def predict_action_agent(inputs: Dict[str, Any]) -> Dict[str, Any]:
 # ==============================================================================
 # LangSmith Dataset Synchronization
 # ==============================================================================
+
 
 def sync_ground_truth_to_langsmith(
     dataset_name: str = DATASET_NAME,
@@ -262,6 +265,7 @@ def sync_ground_truth_to_langsmith(
 # ==============================================================================
 # UNIT TESTS: Evaluator Logic Verification
 # ==============================================================================
+
 
 def test_evaluator_metric_1_non_empty_response():
     """Validates Metric 1: non-empty output detection."""
@@ -376,6 +380,7 @@ def test_evaluator_metric_3_semantic_content_presence_mock_classifier():
 # INTEGRATION EVALS: Action Agent with Real LLM & Mocked Tools
 # ==============================================================================
 
+
 @pytest.fixture(autouse=True)
 def reset_financial_state():
     """Resets financial storage before each evaluation test."""
@@ -385,8 +390,7 @@ def reset_financial_state():
 
 
 @pytest.mark.skipif(
-    not is_live_llm_available(),
-    reason="Requiere credenciales LLM válidas para el proveedor configurado"
+    not is_live_llm_available(), reason="Requiere credenciales LLM válidas para el proveedor configurado"
 )
 @pytest.mark.parametrize(
     "item",
@@ -409,7 +413,6 @@ def test_action_agent_eval_case_with_real_llm(item: Dict[str, Any]):
 
     # Record initial accounts for user
     initial_accounts = financial_storage.get_accounts_by_user_id(user_id)
-    initial_account_numbers = {acc.account_number for acc in initial_accounts}
 
     # Execute action agent with mocked tool responses
     run_output = predict_action_agent(inputs)
@@ -423,10 +426,7 @@ def test_action_agent_eval_case_with_real_llm(item: Dict[str, Any]):
     # --------------------------------------------------------------------------
     # Métrica 2: Tool calls esperadas vs ejecutadas (Determinista)
     # --------------------------------------------------------------------------
-    m2 = evaluate_tool_calls_match(
-        {"outputs": run_output},
-        {"outputs": {"expected_tool_calls": expected_tool_calls}}
-    )
+    m2 = evaluate_tool_calls_match({"outputs": run_output}, {"outputs": {"expected_tool_calls": expected_tool_calls}})
     assert m2["score"] == 1.0, f"[{example_id}] Métrica 2 falló: {m2['comment']}"
 
     # --------------------------------------------------------------------------
@@ -465,6 +465,7 @@ def test_action_agent_eval_case_with_real_llm(item: Dict[str, Any]):
 # LangSmith Dataset Upload & Evaluation Experiment
 # ==============================================================================
 
+
 def test_sync_ground_truth_dataset_to_langsmith():
     """Validates that ground truth JSON can be synced to LangSmith dataset."""
     api_key = settings.langchain_api_key or os.getenv("LANGCHAIN_API_KEY") or os.getenv("LANGSMITH_API_KEY")
@@ -480,8 +481,7 @@ def test_sync_ground_truth_dataset_to_langsmith():
 
 
 @pytest.mark.skipif(
-    not is_live_llm_available(),
-    reason="Requiere credenciales LLM válidas para el proveedor configurado"
+    not is_live_llm_available(), reason="Requiere credenciales LLM válidas para el proveedor configurado"
 )
 def test_langsmith_action_agent_experiment():
     """
@@ -534,6 +534,7 @@ def test_langsmith_action_agent_experiment():
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Ejecutar evaluaciones del Action Agent con LangSmith")
     parser.add_argument("--sync-only", action="store_true", help="Solo sincronizar el dataset con LangSmith")
     parser.add_argument("--run-eval", action="store_true", help="Ejecutar la evaluación completa en LangSmith")

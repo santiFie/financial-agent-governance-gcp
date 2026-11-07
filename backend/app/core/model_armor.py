@@ -3,9 +3,11 @@ Model Armor / Prompt Injection Guardrail.
 Inspects incoming user queries and attached documents for adversarial attacks, jailbreaks,
 system prompt overrides, and goal hijacking before passing them to the agent graph.
 """
-import re
+
 import logging
-from typing import Tuple, Optional
+import re
+from typing import Optional, Tuple
+
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -19,12 +21,27 @@ class LocalModelArmorGuard:
 
     # Signatures of prompt injection and adversarial manipulation
     INJECTION_SIGNATURES = [
-        (r"(?i)\b(ignore|ignora|desobedece|olvida)\b.*?\b(all|todas|previas|anteriores|instrucciones|instructions|reglas|rules)\b", "INSTRUCTION_OVERRIDE"),
-        (r"(?i)\b(system override|override system|modo desarrollador|developer mode|dan mode|jailbreak)\b", "JAILBREAK_ATTEMPT"),
-        (r"(?i)\b(act as|actúa como|simula ser)\b.*?\b(root|admin|superadmin|hacker|unrestricted)\b", "ROLEPLAY_HIJACKING"),
-        (r"(?i)\b(transfer|transfiera|transferir)\b.*?\b(sin confirmación|without approval|bypass|sin autorización|directo)\b", "SECURITY_BYPASS"),
+        (
+            r"(?i)\b(ignore|ignora|desobedece|olvida)\b.*?\b(all|todas|previas|anteriores|instrucciones|instructions|reglas|rules)\b",
+            "INSTRUCTION_OVERRIDE",
+        ),
+        (
+            r"(?i)\b(system override|override system|modo desarrollador|developer mode|dan mode|jailbreak)\b",
+            "JAILBREAK_ATTEMPT",
+        ),
+        (
+            r"(?i)\b(act as|actúa como|simula ser)\b.*?\b(root|admin|superadmin|hacker|unrestricted)\b",
+            "ROLEPLAY_HIJACKING",
+        ),
+        (
+            r"(?i)\b(transfer|transfiera|transferir)\b.*?\b(sin confirmación|without approval|bypass|sin autorización|directo)\b",
+            "SECURITY_BYPASS",
+        ),
         (r"(?i)(<system>|\[SYSTEM\]|\{\{system\}\}|```system)", "DELIMITER_INJECTION"),
-        (r"(?i)\b(muestra|revela|print|leak|exfiltrate)\b.*?\b(system prompt|prompt inicial|instrucciones del sistema)\b", "PROMPT_LEAK"),
+        (
+            r"(?i)\b(muestra|revela|print|leak|exfiltrate)\b.*?\b(system prompt|prompt inicial|instrucciones del sistema)\b",
+            "PROMPT_LEAK",
+        ),
     ]
 
     def inspect(self, text: str) -> Tuple[bool, Optional[str], Optional[str]]:
@@ -67,6 +84,7 @@ class HybridModelArmorGuard:
             if settings.use_gcp_model_armor and settings.model_armor_template_id:
                 try:
                     from langchain_google_community.model_armor import ModelArmorSanitizePromptRunnable
+
                     self._gcp_runnable = ModelArmorSanitizePromptRunnable(
                         project=settings.gcp_project_id,
                         location=settings.gcp_location,
@@ -86,7 +104,11 @@ class HybridModelArmorGuard:
             try:
                 res = runnable.invoke(text)
                 if isinstance(res, dict) and res.get("is_threat"):
-                    return True, res.get("threat_category", "MODEL_ARMOR_VIOLATION"), res.get("threat_reason", "GCP Model Armor detected threat")
+                    return (
+                        True,
+                        res.get("threat_category", "MODEL_ARMOR_VIOLATION"),
+                        res.get("threat_reason", "GCP Model Armor detected threat"),
+                    )
                 return self.local_guard.inspect(text)
             except Exception as e:
                 err_msg = str(e).lower()

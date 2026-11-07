@@ -2,25 +2,26 @@
 Transactional persistence layer for core banking operations.
 Thread-safe and atomic with balance lock and idempotency cache.
 """
-import uuid
-import threading
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
 
+import threading
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from mcp_financial_action_server.config import settings
 from mcp_financial_action_server.models import (
-    TransferReceipt,
+    CancelDebitReceipt,
     RegisteredAccountReceipt,
     ScheduledDebitReceipt,
-    CancelDebitReceipt,
+    TransferReceipt,
 )
 from mcp_financial_action_server.validation import (
+    validate_alias,
+    validate_cbu_or_cvu,
+    validate_daily_limit,
     validate_destination_cbu_or_alias,
     validate_transfer_amount,
-    validate_daily_limit,
-    validate_cbu_or_cvu,
-    validate_alias,
 )
-from mcp_financial_action_server.config import settings
 
 
 def _current_timestamp() -> str:
@@ -87,16 +88,46 @@ class FinancialStorage:
         }
         self.ledger = []
         self.history = [
-            {"tx_id": "tx_01", "account_id": "acc_001", "type": "CREDIT", "amount": 350000.00,
-             "description": "Depósito de Haberes / Sueldo Empresa Tech", "timestamp": "2026-10-01T09:00:00+00:00"},
-            {"tx_id": "tx_02", "account_id": "acc_001", "type": "DEBIT", "amount": 15400.00,
-             "description": "Supermercado Coto", "timestamp": "2026-10-03T18:30:00+00:00"},
-            {"tx_id": "tx_03", "account_id": "acc_001", "type": "DEBIT", "amount": 6500.00,
-             "description": "Servicios Públicos - Luz y Agua", "timestamp": "2026-10-05T10:15:00+00:00"},
-            {"tx_id": "tx_04", "account_id": "acc_001", "type": "DEBIT", "amount": 4200.00,
-             "description": "Suscripción Streaming", "timestamp": "2026-10-07T21:00:00+00:00"},
-            {"tx_id": "tx_05", "account_id": "acc_002", "type": "CREDIT", "amount": 500.00,
-             "description": "Transferencia Internacional Recibida", "timestamp": "2026-10-08T12:00:00+00:00"},
+            {
+                "tx_id": "tx_01",
+                "account_id": "acc_001",
+                "type": "CREDIT",
+                "amount": 350000.00,
+                "description": "Depósito de Haberes / Sueldo Empresa Tech",
+                "timestamp": "2026-10-01T09:00:00+00:00",
+            },
+            {
+                "tx_id": "tx_02",
+                "account_id": "acc_001",
+                "type": "DEBIT",
+                "amount": 15400.00,
+                "description": "Supermercado Coto",
+                "timestamp": "2026-10-03T18:30:00+00:00",
+            },
+            {
+                "tx_id": "tx_03",
+                "account_id": "acc_001",
+                "type": "DEBIT",
+                "amount": 6500.00,
+                "description": "Servicios Públicos - Luz y Agua",
+                "timestamp": "2026-10-05T10:15:00+00:00",
+            },
+            {
+                "tx_id": "tx_04",
+                "account_id": "acc_001",
+                "type": "DEBIT",
+                "amount": 4200.00,
+                "description": "Suscripción Streaming",
+                "timestamp": "2026-10-07T21:00:00+00:00",
+            },
+            {
+                "tx_id": "tx_05",
+                "account_id": "acc_002",
+                "type": "CREDIT",
+                "amount": 500.00,
+                "description": "Transferencia Internacional Recibida",
+                "timestamp": "2026-10-08T12:00:00+00:00",
+            },
         ]
         self.idempotency_store = {}
         self.daily_transfers = {}

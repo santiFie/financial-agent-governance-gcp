@@ -1,7 +1,9 @@
 """
 Pydantic schemas and domain models for MCP Financial Action Server.
 """
-from typing import Optional, Literal
+
+from typing import Literal, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -52,10 +54,14 @@ class RegisteredAccountReceipt(BaseModel):
 class ScheduleDebitRequest(BaseModel):
     user_id: str = Field(..., description="ID del usuario")
     account_id: str = Field(..., description="ID de la cuenta a debitar")
-    service_provider: str = Field(..., min_length=2, description="Empresa prestadora del servicio (ej. Edesur, Telecom)")
+    service_provider: str = Field(
+        ..., min_length=2, description="Empresa prestadora del servicio (ej. Edesur, Telecom)"
+    )
     customer_reference: str = Field(..., min_length=1, description="Número de cliente o referencia de pago")
     max_amount: float = Field(..., gt=0, description="Tope máximo permitido para el débito automático")
-    frequency: Literal["MONTHLY", "BIWEEKLY", "WEEKLY", "ANNUAL"] = Field("MONTHLY", description="Frecuencia del débito")
+    frequency: Literal["MONTHLY", "BIWEEKLY", "WEEKLY", "ANNUAL"] = Field(
+        "MONTHLY", description="Frecuencia del débito"
+    )
 
 
 class ScheduledDebitReceipt(BaseModel):

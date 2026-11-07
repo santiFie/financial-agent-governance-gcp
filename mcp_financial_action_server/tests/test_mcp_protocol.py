@@ -2,10 +2,11 @@
 MCP Protocol and FastMCP Integration Tests.
 Verifies tool discovery, schemas, annotations, and ASGI HTTP endpoint behavior.
 """
+
 import pytest
 from starlette.testclient import TestClient
 
-from mcp_financial_action_server.server import mcp, app
+from mcp_financial_action_server.server import app, mcp
 from mcp_financial_action_server.storage import financial_storage
 
 

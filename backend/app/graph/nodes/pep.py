@@ -4,29 +4,33 @@ Security boundary enforcing authorization policies before funds are debited.
 Every staged tool call is sent to the Policy Decision Point (PDP) together with its tool name.
 For transfers the PDP answer decides Fast-Path vs HITL interrupt.
 """
+
 import logging
-from typing import Dict, Any, List, Optional
-import httpx
 import uuid
+from typing import Any, Dict, List, Optional
+
+import httpx
 from langchain_core.messages import AIMessage
 from langgraph.types import interrupt
 
-from app.graph.state import AgentState
-from app.graph.plan_utils import complete_active_step
 from app.config import settings
-from app.db.mock_banking import mock_banking_db
-from app.core.security_context import token_vault, normalize_account_reference
 from app.core.mcp_action_client import mcp_action_client
+from app.core.security_context import normalize_account_reference, token_vault
 from app.core.timeline import pdp_decision_observer
+from app.db.mock_banking import mock_banking_db
+from app.graph.plan_utils import complete_active_step
+from app.graph.state import AgentState
 
 logger = logging.getLogger(__name__)
 
 
 class AwaitableDict(dict):
     """Dictionary subclass enabling both sync and async await execution."""
+
     def __await__(self):
         async def _identity():
             return self
+
         return _identity().__await__()
 
 
@@ -54,15 +58,17 @@ def _execution_failed(
     state: AgentState, error: Exception, approval_status: str, action: str = "ejecutar la transferencia"
 ) -> "AwaitableDict":
     msg = f"❌ **No se pudo {action}**\n\n• Motivo: {error}"
-    return AwaitableDict({
-        "final_response": msg,
-        "status": "FAILED",
-        "approval_status": approval_status,
-        "pending_tool_calls": [],
-        "pending_transfer": None,
-        "execution_plan": _mark_current_step_completed(state, msg),
-        "messages": [AIMessage(content=msg)],
-    })
+    return AwaitableDict(
+        {
+            "final_response": msg,
+            "status": "FAILED",
+            "approval_status": approval_status,
+            "pending_tool_calls": [],
+            "pending_transfer": None,
+            "execution_plan": _mark_current_step_completed(state, msg),
+            "messages": [AIMessage(content=msg)],
+        }
+    )
 
 
 def _query_pdp(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -155,10 +161,12 @@ def pep_node(state: AgentState) -> AwaitableDict:
     session_id = state.get("session_id", "default")
 
     if not pending_tool_calls and not state.get("pending_transfer"):
-        return AwaitableDict({
-            "status": state.get("status", "COMPLETED"),
-            "approval_status": state.get("approval_status", "NONE"),
-        })
+        return AwaitableDict(
+            {
+                "status": state.get("status", "COMPLETED"),
+                "approval_status": state.get("approval_status", "NONE"),
+            }
+        )
 
     registered: List[str] = []
     for call in pending_tool_calls:
@@ -172,15 +180,17 @@ def pep_node(state: AgentState) -> AwaitableDict:
     has_transfer = any(c.get("name") == TRANSFER_TOOL for c in pending_tool_calls) or state.get("pending_transfer")
     if registered and not has_transfer:
         msg = "\n\n".join(registered)
-        return AwaitableDict({
-            "final_response": msg,
-            "status": "COMPLETED",
-            "approval_status": state.get("approval_status", "NONE"),
-            "pending_tool_calls": [],
-            "pending_transfer": None,
-            "execution_plan": _mark_current_step_completed(state, msg),
-            "messages": [AIMessage(content=msg)],
-        })
+        return AwaitableDict(
+            {
+                "final_response": msg,
+                "status": "COMPLETED",
+                "approval_status": state.get("approval_status", "NONE"),
+                "pending_tool_calls": [],
+                "pending_transfer": None,
+                "execution_plan": _mark_current_step_completed(state, msg),
+                "messages": [AIMessage(content=msg)],
+            }
+        )
 
     return _govern_transfer(state, pending_tool_calls, user_id, session_id)
 
@@ -211,9 +221,7 @@ def _govern_transfer(
             args = tool_call.get("args", {})
             amount = float(args.get("amount", 0.0))
             destination = normalize_account_reference(
-                args.get("destination_account")
-                or args.get("destination")
-                or args.get("target_token")
+                args.get("destination_account") or args.get("destination") or args.get("target_token")
             )
             source_account = str(args.get("source_account_id") or args.get("source_account") or "acc_001")
             concept = str(args.get("concept", concept))
@@ -228,9 +236,7 @@ def _govern_transfer(
             or pending_transfer.get("target_token")
         )
         source_account = str(
-            pending_transfer.get("source_account")
-            or pending_transfer.get("source_account_id")
-            or "acc_001"
+            pending_transfer.get("source_account") or pending_transfer.get("source_account_id") or "acc_001"
         )
         concept = str(pending_transfer.get("concept", concept))
 
@@ -258,12 +264,7 @@ def _govern_transfer(
         is_trusted = bool(mcp_action_client.is_trusted_recipient(user_id, destination, session_id=session_id))
 
     # Query Policy Decision Point (PDP) via HTTP POST
-    pdp_payload = {
-        "user_id": user_id,
-        "tool_name": TRANSFER_TOOL,
-        "amount": amount,
-        "is_trusted_recipient": is_trusted
-    }
+    pdp_payload = {"user_id": user_id, "tool_name": TRANSFER_TOOL, "amount": amount, "is_trusted_recipient": is_trusted}
 
     pdp_decision = _decide(pdp_payload)
 
@@ -274,22 +275,28 @@ def _govern_transfer(
             # PDP unavailable: fail closed without flagging the request as a security threat
             return _execution_failed(state, RuntimeError(reason), approval_status="NONE")
         block_msg = f"❌ **Operación Bloqueada por Gobernanza PEP**\n\n• Motivo: {reason}"
-        return AwaitableDict({
-            "final_response": block_msg,
-            "status": "BLOCKED",
-            "approval_status": "BLOCKED",
-            "is_threat": True,
-            "pending_tool_calls": [],
-            "pending_transfer": None,
-            "execution_plan": _mark_current_step_completed(state, block_msg),
-            "messages": [AIMessage(content=block_msg)],
-        })
+        return AwaitableDict(
+            {
+                "final_response": block_msg,
+                "status": "BLOCKED",
+                "approval_status": "BLOCKED",
+                "is_threat": True,
+                "pending_tool_calls": [],
+                "pending_transfer": None,
+                "execution_plan": _mark_current_step_completed(state, block_msg),
+                "messages": [AIMessage(content=block_msg)],
+            }
+        )
 
     # Fast-Path Granted: No interrupt(), direct transfer through the MCP action server
     if not pdp_decision.get("require_hitl", False):
         try:
             receipt = _execute_via_mcp(
-                user_id, source_account, target_for_check, amount, concept,
+                user_id,
+                source_account,
+                target_for_check,
+                amount,
+                concept,
                 idempotency_key=f"fastpath-{session_id}-{uuid.uuid4().hex[:12]}",
             )
         except Exception as e:
@@ -304,15 +311,17 @@ def _govern_transfer(
             f"• **Gobernanza PEP:** Autorización Fast-Path concedida por PDP (Destinatario en agenda y monto < $50.000 ARS)."
         )
 
-        return AwaitableDict({
-            "final_response": msg,
-            "status": "COMPLETED",
-            "approval_status": "APPROVED",
-            "pending_tool_calls": [],
-            "pending_transfer": None,
-            "execution_plan": _mark_current_step_completed(state, msg),
-            "messages": [AIMessage(content=msg)],
-        })
+        return AwaitableDict(
+            {
+                "final_response": msg,
+                "status": "COMPLETED",
+                "approval_status": "APPROVED",
+                "pending_tool_calls": [],
+                "pending_transfer": None,
+                "execution_plan": _mark_current_step_completed(state, msg),
+                "messages": [AIMessage(content=msg)],
+            }
+        )
 
     # HITL Required: Stage transfer and interrupt graph
     staged = mock_banking_db.stage_transfer(
@@ -320,37 +329,47 @@ def _govern_transfer(
         user_id=user_id,
         amount=amount,
         source_account_id=source_account,
-        target_token=destination
+        target_token=destination,
     )
     tx_id = staged["transaction_id"]
 
-    approval_decision = interrupt({
-        "action": "APPROVAL_REQUIRED",
-        "type": "HUMAN_IN_THE_LOOP_APPROVAL_REQUIRED",
-        "transaction_id": tx_id,
-        "amount": amount,
-        "currency": "ARS",
-        "source_account": source_account,
-        "target_token": destination,
-        "details": {
+    approval_decision = interrupt(
+        {
+            "action": "APPROVAL_REQUIRED",
+            "type": "HUMAN_IN_THE_LOOP_APPROVAL_REQUIRED",
             "transaction_id": tx_id,
-            "user_id": user_id,
             "amount": amount,
+            "currency": "ARS",
             "source_account": source_account,
-            "destination": destination,
-            "reason": pdp_decision.get("reason", "Monto elevado o destinatario no registrado"),
-        },
-        "message": f"Transferencia de ${amount:,.2f} a {destination} requiere autorización humana."
-    })
+            "target_token": destination,
+            "details": {
+                "transaction_id": tx_id,
+                "user_id": user_id,
+                "amount": amount,
+                "source_account": source_account,
+                "destination": destination,
+                "reason": pdp_decision.get("reason", "Monto elevado o destinatario no registrado"),
+            },
+            "message": f"Transferencia de ${amount:,.2f} a {destination} requiere autorización humana.",
+        }
+    )
 
     # Resumed execution upon Human Approval/Rejection
     decision = approval_decision.get("decision", "REJECTED") if isinstance(approval_decision, dict) else "REJECTED"
-    admin_user = approval_decision.get("admin_user", "compliance_officer") if isinstance(approval_decision, dict) else "compliance_officer"
+    admin_user = (
+        approval_decision.get("admin_user", "compliance_officer")
+        if isinstance(approval_decision, dict)
+        else "compliance_officer"
+    )
 
     if decision == "APPROVED":
         try:
             receipt = _execute_via_mcp(
-                user_id, source_account, target_for_check, amount, f"HITL_TRANSFER_{tx_id}",
+                user_id,
+                source_account,
+                target_for_check,
+                amount,
+                f"HITL_TRANSFER_{tx_id}",
                 idempotency_key=f"hitl-tx-{tx_id}",
             )
         except Exception as e:
@@ -368,7 +387,11 @@ def _govern_transfer(
         status = "COMPLETED"
         approval_status = "APPROVED"
     else:
-        reason = approval_decision.get("reason", "Rechazada por política de seguridad") if isinstance(approval_decision, dict) else "Rechazada"
+        reason = (
+            approval_decision.get("reason", "Rechazada por política de seguridad")
+            if isinstance(approval_decision, dict)
+            else "Rechazada"
+        )
         mock_banking_db.reject_staged_transfer(tx_id=tx_id, admin_user=admin_user, reason=reason)
         msg = (
             f"❌ **Transferencia Rechazada**\n\n"
@@ -379,12 +402,14 @@ def _govern_transfer(
         status = "COMPLETED"
         approval_status = "REJECTED"
 
-    return AwaitableDict({
-        "final_response": msg,
-        "status": status,
-        "approval_status": approval_status,
-        "pending_transfer": staged,
-        "pending_tool_calls": [],
-        "execution_plan": _mark_current_step_completed(state, msg),
-        "messages": [AIMessage(content=msg)],
-    })
+    return AwaitableDict(
+        {
+            "final_response": msg,
+            "status": status,
+            "approval_status": approval_status,
+            "pending_transfer": staged,
+            "pending_tool_calls": [],
+            "execution_plan": _mark_current_step_completed(state, msg),
+            "messages": [AIMessage(content=msg)],
+        }
+    )

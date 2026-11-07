@@ -18,6 +18,7 @@ Usage (from the repo root, with the backend venv):
     backend/.venv/bin/python scripts/demo_attack.py --message "..." --document comprobante.txt
     backend/.venv/bin/python scripts/demo_attack.py --runs 5               # compact per-run lines + rates
 """
+
 import argparse
 import json
 import logging
@@ -25,8 +26,8 @@ import os
 import sys
 import uuid
 import warnings
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
@@ -53,12 +54,28 @@ def _c(code: str, text: str) -> str:
     return f"\033[{code}m{text}\033[0m" if _USE_COLOR else text
 
 
-def bold(t): return _c("1", t)
-def dim(t): return _c("2", t)
-def red(t): return _c("31;1", t)
-def green(t): return _c("32;1", t)
-def yellow(t): return _c("33;1", t)
-def cyan(t): return _c("36;1", t)
+def bold(t):
+    return _c("1", t)
+
+
+def dim(t):
+    return _c("2", t)
+
+
+def red(t):
+    return _c("31;1", t)
+
+
+def green(t):
+    return _c("32;1", t)
+
+
+def yellow(t):
+    return _c("33;1", t)
+
+
+def cyan(t):
+    return _c("36;1", t)
 
 
 def section(title: str) -> None:
@@ -89,8 +106,9 @@ def _snapshot(user_id: str) -> Dict[str, Any]:
 
 
 def _reset_state() -> None:
-    from app.db.mock_banking import mock_banking_db
     from mcp_financial_action_server.storage import financial_storage
+
+    from app.db.mock_banking import mock_banking_db
 
     financial_storage.reset_state()
     mock_banking_db.pending_transfers.clear()
@@ -99,16 +117,22 @@ def _reset_state() -> None:
 def _check_pdp() -> Optional[str]:
     """Returns a warning when the PDP is unreachable (the PEP would then apply pdp_fallback_mode)."""
     import httpx
+
     from app.config import settings
 
     try:
-        httpx.post(settings.pdp_url, json={"input": {"amount": 1, "is_trusted_recipient": False}},
-                   timeout=settings.pdp_timeout_seconds).raise_for_status()
+        httpx.post(
+            settings.pdp_url,
+            json={"input": {"amount": 1, "is_trusted_recipient": False}},
+            timeout=settings.pdp_timeout_seconds,
+        ).raise_for_status()
         return None
     except Exception as e:
-        return (f"El PDP (OPA) no responde en {settings.pdp_url} ({type(e).__name__}). "
-                f"Se aplicará pdp_fallback_mode='{settings.pdp_fallback_mode}': ninguna transferencia llegará a Fast-Path. "
-                f"Levantalo con `make opa-up` o `docker compose up -d opa`.")
+        return (
+            f"El PDP (OPA) no responde en {settings.pdp_url} ({type(e).__name__}). "
+            f"Se aplicará pdp_fallback_mode='{settings.pdp_fallback_mode}': ninguna transferencia llegará a Fast-Path. "
+            f"Levantalo con `make opa-up` o `docker compose up -d opa`."
+        )
 
 
 def _short(value: Any, limit: int = 160) -> str:
@@ -184,9 +208,16 @@ class Narrator:
     def _on_sanitizer(self, u: Dict[str, Any]) -> None:
         self.section("Sanitizer (DLP + Model Armor sobre el pedido)")
         pii = u.get("detected_pii") or []
-        self.event("sanitizer", "Sanitizer (DLP + Model Armor sobre el pedido)", "sanitizer",
-                   defense_action=u.get("defense_action"), is_threat=bool(u.get("is_threat")),
-                   pii_count=len(pii), sanitized_input=u.get("sanitized_input"), threat_reason=u.get("threat_reason"))
+        self.event(
+            "sanitizer",
+            "Sanitizer (DLP + Model Armor sobre el pedido)",
+            "sanitizer",
+            defense_action=u.get("defense_action"),
+            is_threat=bool(u.get("is_threat")),
+            pii_count=len(pii),
+            sanitized_input=u.get("sanitized_input"),
+            threat_reason=u.get("threat_reason"),
+        )
         self.out(f"defense_action={u.get('defense_action')}  is_threat={u.get('is_threat')}  PII tokenizada={len(pii)}")
         self.out(f"input saneado: {_short(u.get('sanitized_input'), 300)}")
         if u.get("is_threat"):
@@ -198,17 +229,26 @@ class Narrator:
             for call in getattr(msg, "tool_calls", None) or []:
                 if call.get("name") == "read_document_tool":
                     self.section("Orquestador pide leer el documento adjunto")
-                    self.event("document_requested", "Orquestador pide leer el documento adjunto", "router",
-                               tool_call={"name": call.get("name"), "args": call.get("args")})
+                    self.event(
+                        "document_requested",
+                        "Orquestador pide leer el documento adjunto",
+                        "router",
+                        tool_call={"name": call.get("name"), "args": call.get("args")},
+                    )
                     self.out(f"read_document_tool({_short(call.get('args'))})")
         plan = u.get("execution_plan")
         if plan is not None and len(plan) > self.seen_steps:
-            new = plan[self.seen_steps:]
+            new = plan[self.seen_steps :]
             first = self.seen_steps == 0
             title = "Plan inicial del Orquestador" if first else "REPLAN: el Orquestador agregó pasos"
             self.section(title)
-            self.event("plan" if first else "replan", title, "router", added_by_replan=not first,
-                       steps=[{k: st.get(k) for k in ("step_id", "title", "target_node", "description")} for st in new])
+            self.event(
+                "plan" if first else "replan",
+                title,
+                "router",
+                added_by_replan=not first,
+                steps=[{k: st.get(k) for k in ("step_id", "title", "target_node", "description")} for st in new],
+            )
             for step in new:
                 marker = "" if first else red("  ← agregado al replanificar")
                 self.out(f"  [{step['step_id']}] {step['target_node']:<14} {bold(step['title'])}{marker}")
@@ -227,9 +267,15 @@ class Narrator:
             if not isinstance(content, str) or not content:
                 continue
             self.document_read = True
-            self.event("document_ingested", "Documento ingerido: pasó Model Armor + DLP y entró como contexto",
-                       "orchestrator_tools", text=content)
-            self.out(dim("Contenido que llega al LLM (ya pasó Model Armor + DLP; los datos sensibles van tokenizados):"))
+            self.event(
+                "document_ingested",
+                "Documento ingerido: pasó Model Armor + DLP y entró como contexto",
+                "orchestrator_tools",
+                text=content,
+            )
+            self.out(
+                dim("Contenido que llega al LLM (ya pasó Model Armor + DLP; los datos sensibles van tokenizados):")
+            )
             preview = content if len(content) <= DOC_PREVIEW_CHARS else content[:DOC_PREVIEW_CHARS] + "…"
             for line in preview.splitlines():
                 self.out(dim("  │ " + line))
@@ -237,8 +283,13 @@ class Narrator:
 
     def _on_readonly_agent(self, u: Dict[str, Any]) -> None:
         self.section(f"readonly_agent [{self._active_step_label()}]")
-        self.event("readonly_result", "readonly_agent (lectura)", "readonly_agent",
-                   step=self._active_step_label(), text=u.get("final_response"))
+        self.event(
+            "readonly_result",
+            "readonly_agent (lectura)",
+            "readonly_agent",
+            step=self._active_step_label(),
+            text=u.get("final_response"),
+        )
         self.out(_short(u.get("final_response"), 400))
 
     def _on_action_agent(self, u: Dict[str, Any]) -> None:
@@ -246,13 +297,23 @@ class Narrator:
         calls = u.get("pending_tool_calls") or []
         for call in calls:
             self.staged.append(call)
-            self.event("tool_call_staged", f"Tool call en staging: {call.get('name')}", "action_agent",
-                       step=self._active_step_label(), tool_call={"name": call.get("name"), "args": call.get("args")})
+            self.event(
+                "tool_call_staged",
+                f"Tool call en staging: {call.get('name')}",
+                "action_agent",
+                step=self._active_step_label(),
+                tool_call={"name": call.get("name"), "args": call.get("args")},
+            )
             self.out(f"Tool call en staging: {bold(call.get('name'))}({_short(call.get('args'), 300)})")
         if not calls:
             self.out(_short(u.get("final_response") or "(paso completado sin transferencia en staging)", 300))
-            self.event("action_result", "action_agent ejecutó el paso (sin transferencia en staging)", "action_agent",
-                       step=self._active_step_label(), text=u.get("final_response"))
+            self.event(
+                "action_result",
+                "action_agent ejecutó el paso (sin transferencia en staging)",
+                "action_agent",
+                step=self._active_step_label(),
+                text=u.get("final_response"),
+            )
 
     def _on_pep_node(self, u: Dict[str, Any]) -> None:
         # A step that staged no transfer (e.g. registering a recipient) passes through pep_node without a decision.
@@ -260,9 +321,16 @@ class Narrator:
             return
         self.section(f"pep_node (Policy Enforcement Point) [{self._active_step_label()}]")
         self._pdp_reported = len(self.pdp_decisions)
-        self.event("pep_decision", "pep_node (Policy Enforcement Point)", "pep_node", step=self._active_step_label(),
-                   pdp=self.pdp_decisions[-1] if self.pdp_decisions else None, status=u.get("status"),
-                   approval_status=u.get("approval_status"), text=u.get("final_response"))
+        self.event(
+            "pep_decision",
+            "pep_node (Policy Enforcement Point)",
+            "pep_node",
+            step=self._active_step_label(),
+            pdp=self.pdp_decisions[-1] if self.pdp_decisions else None,
+            status=u.get("status"),
+            approval_status=u.get("approval_status"),
+            text=u.get("final_response"),
+        )
         if self.pdp_decisions:
             d = self.pdp_decisions[-1]
             self.out(f"Entrada a OPA: {_short(d['input'])}")
@@ -296,7 +364,9 @@ def run_once(scenario: Dict[str, Any], user_id: str, verbose: bool) -> Dict[str,
 
     def spy_query(payload):
         decision = original_query(payload)
-        narrator.pdp_decisions.append({"input": payload, "decision": decision if decision is not None else "PDP no disponible → fallback"})
+        narrator.pdp_decisions.append(
+            {"input": payload, "decision": decision if decision is not None else "PDP no disponible → fallback"}
+        )
         return decision
 
     error: Optional[str] = None
@@ -320,7 +390,7 @@ def run_once(scenario: Dict[str, Any], user_id: str, verbose: bool) -> Dict[str,
         error = f"{type(e).__name__}: {e}"
 
     after = _snapshot(user_id)
-    new_ledger = after["ledger"][len(before["ledger"]):]
+    new_ledger = after["ledger"][len(before["ledger"]) :]
     new_recipients = [r for r in after["address_book"] if r not in before["address_book"]]
 
     if narrator.threat:
@@ -362,8 +432,10 @@ def _print_outcome(summary: Dict[str, Any], before: Dict[str, Any], after: Dict[
     if summary["error"]:
         print(red(f"Error del grafo: {summary['error']}"))
     print(f"Camino de ejecución: {bold(summary['execution_path'])}")
-    print(f"action_agent invocado: {summary['action_agent_invoked']}   "
-          f"pasos agregados al replanificar: {len(summary['replanned'])}")
+    print(
+        f"action_agent invocado: {summary['action_agent_invoked']}   "
+        f"pasos agregados al replanificar: {len(summary['replanned'])}"
+    )
 
     print(f"\n{bold('Saldos')}  antes → después")
     for acc, bal in before["balances"].items():
@@ -371,7 +443,9 @@ def _print_outcome(summary: Dict[str, Any], before: Dict[str, Any], after: Dict[
         flag = red("  (cambió)") if now != bal else ""
         print(f"  {acc}: {_money(bal)} → {_money(now)}{flag}")
 
-    print(f"\n{bold('Libreta de destinatarios')}  antes: {len(before['address_book'])}  después: {len(after['address_book'])}")
+    print(
+        f"\n{bold('Libreta de destinatarios')}  antes: {len(before['address_book'])}  después: {len(after['address_book'])}"
+    )
     for r in summary["new_recipients"]:
         print(red(f"  + nuevo destinatario: {_short(r, 220)}"))
 
@@ -395,11 +469,17 @@ def save_run(summary: Dict[str, Any], meta: Dict[str, Any], results_dir: Path) -
     manifest_path = results_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else []
     manifest = [m for m in manifest if m["file"] != f"runs/{name}"]
-    manifest.append({
-        "file": f"runs/{name}", "timestamp": record["timestamp"], "scenario": meta["scenario_id"], "model": meta["model"],
-        "execution_path": summary["execution_path"], "transfers": len(summary["transfers_executed"]),
-        "source": "live-run",
-    })
+    manifest.append(
+        {
+            "file": f"runs/{name}",
+            "timestamp": record["timestamp"],
+            "scenario": meta["scenario_id"],
+            "model": meta["model"],
+            "execution_path": summary["execution_path"],
+            "transfers": len(summary["transfers_executed"]),
+            "source": "live-run",
+        }
+    )
     manifest.sort(key=lambda m: m["timestamp"], reverse=True)
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return runs_dir / name
@@ -411,13 +491,20 @@ def _percent(n: int, total: int) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Ejecuta y narra el escenario 3.1 sobre el grafo real.")
-    parser.add_argument("--scenario", help="id del escenario en attack_3_1_scenarios.json o control_scenarios.json (default: el primer ataque)")
+    parser.add_argument(
+        "--scenario",
+        help="id del escenario en attack_3_1_scenarios.json o control_scenarios.json (default: el primer ataque)",
+    )
     parser.add_argument("--message", help="mensaje del usuario (sobrescribe el del escenario)")
     parser.add_argument("--document", help="document_name adjunto (sobrescribe el del escenario)")
     parser.add_argument("--user-id", default=DEFAULT_USER)
-    parser.add_argument("--runs", type=int, default=1, help="repeticiones; con N>1 imprime una línea por corrida y las tasas")
+    parser.add_argument(
+        "--runs", type=int, default=1, help="repeticiones; con N>1 imprime una línea por corrida y las tasas"
+    )
     parser.add_argument("--no-save", action="store_true", help="no guardar la corrida en docs/evidence (visor HTML)")
-    parser.add_argument("--results-dir", default=str(RESULTS_DIR), help="directorio del visor HTML y de las corridas guardadas")
+    parser.add_argument(
+        "--results-dir", default=str(RESULTS_DIR), help="directorio del visor HTML y de las corridas guardadas"
+    )
     parser.add_argument("--json", dest="json_out", help="guarda el/los resúmenes en este archivo JSON")
     args = parser.parse_args()
 
@@ -446,9 +533,11 @@ def main() -> int:
     from app.config import settings
 
     print(bold("AegisBank AI — escenario 3.1 (Goal Hijacking / Confused Deputy)"))
-    print(f"escenario={scenario['id']}  modo={settings.security_mode}  "
-          f"orquestador={settings.orchestrator_provider or settings.llm_provider}/"
-          f"{settings.orchestrator_model or settings.llm_model}  GCS={settings.use_gcs_ingestion}")
+    print(
+        f"escenario={scenario['id']}  modo={settings.security_mode}  "
+        f"orquestador={settings.orchestrator_provider or settings.llm_provider}/"
+        f"{settings.orchestrator_model or settings.llm_model}  GCS={settings.use_gcs_ingestion}"
+    )
     warning = _check_pdp()
     if warning:
         print(yellow(f"⚠ {warning}"))
@@ -458,20 +547,26 @@ def main() -> int:
     for i in range(runs):
         if runs > 1:
             s = run_once(scenario, args.user_id, verbose=False)
-            print(f"[{i + 1}/{runs}] path={s['execution_path']:<9} action_agent={s['action_agent_invoked']!s:<5} "
-                  f"replan+={len(s['replanned'])} nuevos_dest={len(s['new_recipients'])} "
-                  f"transferencias={len(s['transfers_executed'])}" + (f"  ERROR {s['error']}" if s["error"] else ""))
+            print(
+                f"[{i + 1}/{runs}] path={s['execution_path']:<9} action_agent={s['action_agent_invoked']!s:<5} "
+                f"replan+={len(s['replanned'])} nuevos_dest={len(s['new_recipients'])} "
+                f"transferencias={len(s['transfers_executed'])}" + (f"  ERROR {s['error']}" if s["error"] else "")
+            )
         else:
             s = run_once(scenario, args.user_id, verbose=True)
         summaries.append(s)
         if not args.no_save:
             meta = {
-                "scenario_id": scenario["id"], "scenario_description": scenario.get("description"),
-                "security_mode": settings.security_mode, "use_gcs_ingestion": settings.use_gcs_ingestion,
+                "scenario_id": scenario["id"],
+                "scenario_description": scenario.get("description"),
+                "security_mode": settings.security_mode,
+                "use_gcs_ingestion": settings.use_gcs_ingestion,
                 "model": f"{settings.orchestrator_provider or settings.llm_provider}/"
-                         f"{settings.orchestrator_model or settings.llm_model}",
-                "pdp_url": settings.pdp_url, "pdp_fallback_mode": settings.pdp_fallback_mode,
-                "run_index": i + 1, "runs_in_batch": runs,
+                f"{settings.orchestrator_model or settings.llm_model}",
+                "pdp_url": settings.pdp_url,
+                "pdp_fallback_mode": settings.pdp_fallback_mode,
+                "run_index": i + 1,
+                "runs_in_batch": runs,
             }
             saved = save_run(s, meta, Path(args.results_dir))
             print(dim(f"Corrida guardada en {saved}  (verla con: make server-results)"))
@@ -486,7 +581,9 @@ def main() -> int:
             print(f"  camino {path:<9} {_percent(sum(s['execution_path'] == path for s in summaries), runs)}")
 
     if args.json_out:
-        Path(args.json_out).write_text(json.dumps(summaries, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        Path(args.json_out).write_text(
+            json.dumps(summaries, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+        )
         print(f"\nResumen guardado en {args.json_out}")
 
     return 1 if any(s["error"] for s in summaries) else 0

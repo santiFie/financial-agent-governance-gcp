@@ -1,7 +1,9 @@
 """
 Configuration settings for Financial Action MCP Server.
 """
+
 import os
+
 from pydantic import BaseModel, Field
 
 

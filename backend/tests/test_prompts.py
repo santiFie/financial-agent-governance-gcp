@@ -2,14 +2,22 @@
 Unit tests for Prompt Management and Decoupled Prompt Registry.
 Validates template loading, required variable validation and rendering.
 """
+
 import pytest
-from app.core.prompt_manager import prompt_manager, PromptManager
+
+from app.core.prompt_manager import prompt_manager
 
 
 def test_all_prompts_registered():
     """Verify that all core prompt templates are present and loaded."""
     prompts = prompt_manager.list_prompts()
-    for name in ("orchestrator_initial", "orchestrator_replan", "readonly_agent", "action_agent", "sanitizer_responses"):
+    for name in (
+        "orchestrator_initial",
+        "orchestrator_replan",
+        "readonly_agent",
+        "action_agent",
+        "sanitizer_responses",
+    ):
         assert name in prompts
 
 

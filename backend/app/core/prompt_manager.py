@@ -5,7 +5,8 @@ Loads prompt templates from YAML files and validates required template parameter
 """
 
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
+
 import yaml
 from pydantic import BaseModel, Field
 
@@ -56,9 +57,7 @@ class PromptManager:
     def get_prompt(self, name: str) -> PromptTemplateModel:
         """Retrieves the PromptTemplateModel for a given name."""
         if name not in self._prompts:
-            raise KeyError(
-                f"Prompt '{name}' no encontrado. Prompts disponibles: {list(self._prompts.keys())}"
-            )
+            raise KeyError(f"Prompt '{name}' no encontrado. Prompts disponibles: {list(self._prompts.keys())}")
         return self._prompts[name]
 
     def render(self, name: str, **kwargs: Any) -> str:
@@ -69,9 +68,7 @@ class PromptManager:
 
         missing = [var for var in prompt.required_variables if var not in kwargs]
         if missing:
-            raise ValueError(
-                f"Variables faltantes para renderizar el prompt '{name}': {missing}"
-            )
+            raise ValueError(f"Variables faltantes para renderizar el prompt '{name}': {missing}")
 
         template_str = prompt.system_template.strip()
         return template_str.format(**kwargs)

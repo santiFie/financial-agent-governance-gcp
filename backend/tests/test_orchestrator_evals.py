@@ -9,6 +9,7 @@ Plan quality metrics:
 
 The adversarial-document case has no expected plan: it is only measured (see test_attack_3_1_e2e_evals.py).
 """
+
 import json
 import logging
 import os
@@ -38,12 +39,12 @@ from app.graph.graph import route_after_router
 from app.graph.nodes.router import router_node
 from app.graph.state import AgentState
 from app.graph.tools.document_reader import read_document_tool
-from decision_models_evaluators import (
-    get_decision_evaluator_classifier,
-    evaluate_plan_targets_match,
-    evaluate_plan_params_copied,
-    evaluate_plan_within_limits,
+from tests.decision_models_evaluators import (
     evaluate_plan_grounded_in_request,
+    evaluate_plan_params_copied,
+    evaluate_plan_targets_match,
+    evaluate_plan_within_limits,
+    get_decision_evaluator_classifier,
 )
 from tests.live_llm import requires_live_llm
 
@@ -75,8 +76,10 @@ def local_document(fixture_name: Optional[str]):
 # Predict function
 # ==============================================================================
 
+
 def _build_orchestrator_graph():
     """Orchestrator-only graph: same router, routing function and document ToolNode as production, no executors."""
+
     def route(state: AgentState) -> str:
         return "orchestrator_tools" if route_after_router(state) == "orchestrator_tools" else END
 
@@ -111,7 +114,7 @@ def predict_orchestrator(inputs: Dict[str, Any]) -> Dict[str, Any]:
 
     document_read = any(isinstance(m, ToolMessage) for m in final.get("orchestrator_scratchpad") or [])
     return {
-        "plan": list(final.get("execution_plan") or [])[len(prior_plan):],
+        "plan": list(final.get("execution_plan") or [])[len(prior_plan) :],
         "final_response": final.get("final_response"),
         "status": final.get("status"),
         "is_threat": bool(final.get("is_threat")),
@@ -122,6 +125,7 @@ def predict_orchestrator(inputs: Dict[str, Any]) -> Dict[str, Any]:
 # ==============================================================================
 # LangSmith dataset synchronization
 # ==============================================================================
+
 
 def sync_ground_truth_to_langsmith(
     dataset_name: str = DATASET_NAME,
@@ -147,7 +151,9 @@ def sync_ground_truth_to_langsmith(
             dataset_name=dataset_name, description="Dataset para evaluación de planes del Orchestrator"
         )
 
-    existing_ids = {ex.metadata["id"] for ex in client.list_examples(dataset_id=dataset.id) if ex.metadata and "id" in ex.metadata}
+    existing_ids = {
+        ex.metadata["id"] for ex in client.list_examples(dataset_id=dataset.id) if ex.metadata and "id" in ex.metadata
+    }
     for item in items:
         if item["id"] in existing_ids:
             continue
@@ -163,6 +169,7 @@ def sync_ground_truth_to_langsmith(
 # ==============================================================================
 # Offline: evaluator logic
 # ==============================================================================
+
 
 def _run(plan, final_response=None, status="IN_PROGRESS"):
     return {"outputs": {"plan": plan, "final_response": final_response, "status": status}}
@@ -223,11 +230,10 @@ def test_plan_grounded_evaluator_uses_decision_model_score():
 # Live: real LLM
 # ==============================================================================
 
+
 @requires_live_llm
 @pytest.mark.langsmith
-@pytest.mark.parametrize(
-    "item", load_ground_truth_data(), ids=[i["id"] for i in load_ground_truth_data()]
-)
+@pytest.mark.parametrize("item", load_ground_truth_data(), ids=[i["id"] for i in load_ground_truth_data()])
 def test_orchestrator_eval_case_with_real_llm(item: Dict[str, Any]):
     output = predict_orchestrator(item["input"])
     run, example = {"outputs": output}, {"inputs": item["input"], "outputs": item}
@@ -300,6 +306,7 @@ def test_langsmith_orchestrator_experiment():
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Evals del Orchestrator con LangSmith")
     parser.add_argument("--sync-only", action="store_true")
     parser.add_argument("--run-eval", action="store_true")

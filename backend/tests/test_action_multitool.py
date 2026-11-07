@@ -2,18 +2,20 @@
 Unit and integration tests for Action Agent Multi-Tool Execution and FastMCP Address Book Registration.
 Validates Plan 3: Multi-tool chaining within a single turn (Confused Deputy PoC).
 """
-import pytest
-from unittest.mock import MagicMock, patch
+
 from typing import List
+from unittest.mock import patch
+
+import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
-
-from app.graph.nodes.action_agent import action_agent_node
-from app.graph.tools.banking_write import register_recipient_tool, transfer_funds_tool, execute_register_recipient
-from app.core.mcp_action_client import mcp_action_client, MCPActionClient
-from app.core.security_context import token_vault
 from mcp_financial_action_server.storage import financial_storage
+
+from app.core.mcp_action_client import mcp_action_client
+from app.core.security_context import token_vault
+from app.graph.nodes.action_agent import action_agent_node
+from app.graph.tools.banking_write import execute_register_recipient, register_recipient_tool, transfer_funds_tool
 
 
 @pytest.fixture(autouse=True)
@@ -30,9 +32,13 @@ def clean_storage_and_vault():
 
 def test_register_recipient_tool_only_stages_the_request():
     """The tool does not touch the address book: the PEP executes it once the PDP allows it."""
-    staged = register_recipient_tool.invoke({
-        "user_id": "user_test_00", "recipient_name": "Proveedor", "cbu": "0170099900000012345678",
-    })
+    staged = register_recipient_tool.invoke(
+        {
+            "user_id": "user_test_00",
+            "recipient_name": "Proveedor",
+            "cbu": "0170099900000012345678",
+        }
+    )
 
     assert staged["status"] == "PENDING_PEP"
     assert not financial_storage.address_book.get("user_test_00")
@@ -59,9 +65,9 @@ def test_execute_register_recipient_persists_into_the_address_book():
     assert recipients[0]["cbu_or_cvu"] == cbu
 
     # Verify is_trusted_recipient
-    assert mcp_action_client.is_trusted_recipient(user_id, cbu) == True
-    assert mcp_action_client.is_trusted_recipient(user_id, "fideicomiso.afip") == True
-    assert mcp_action_client.is_trusted_recipient(user_id, "0000000000000000000000") == False
+    assert mcp_action_client.is_trusted_recipient(user_id, cbu)
+    assert mcp_action_client.is_trusted_recipient(user_id, "fideicomiso.afip")
+    assert not mcp_action_client.is_trusted_recipient(user_id, "0000000000000000000000")
 
 
 def test_execute_register_recipient_with_token_resolution():
@@ -81,20 +87,22 @@ def test_execute_register_recipient_with_token_resolution():
     assert receipt["cbu_or_cvu"] == raw_cbu
 
     # Both raw CBU and token must be trusted
-    assert mcp_action_client.is_trusted_recipient(user_id, raw_cbu, session_id=session_id) == True
-    assert mcp_action_client.is_trusted_recipient(user_id, token, session_id=session_id) == True
+    assert mcp_action_client.is_trusted_recipient(user_id, raw_cbu, session_id=session_id)
+    assert mcp_action_client.is_trusted_recipient(user_id, token, session_id=session_id)
 
 
 def test_transfer_funds_tool_emits_pending_payload():
     """Validates that transfer_funds_tool outputs structured payload without debiting."""
     user_id = "user_test_03"
-    result = transfer_funds_tool.invoke({
-        "user_id": user_id,
-        "source_account": "acc_001",
-        "destination_account": "[CBU_BANCARIO_1]",
-        "amount": 35000.0,
-        "concept": "Ajuste Fiscal"
-    })
+    result = transfer_funds_tool.invoke(
+        {
+            "user_id": user_id,
+            "source_account": "acc_001",
+            "destination_account": "[CBU_BANCARIO_1]",
+            "amount": 35000.0,
+            "concept": "Ajuste Fiscal",
+        }
+    )
 
     assert result["status"] == "PENDING_PEP"
     assert result["user_id"] == user_id
@@ -105,6 +113,7 @@ def test_transfer_funds_tool_emits_pending_payload():
 
 class ScriptedChatModel(BaseChatModel):
     """Chat model that replays scripted AIMessages (supports bind_tools for the ReAct loop)."""
+
     script: List[AIMessage]
     cursor: int = 0
 
@@ -131,15 +140,27 @@ def test_action_agent_stages_transfer_for_pep_and_leaves_step_open():
     user_id = "user_default_01"
     transfer_call = {
         "name": "transfer_funds_tool",
-        "args": {"user_id": user_id, "source_account": "acc_001", "destination_account": "[CBU_BANCARIO_1]",
-                 "amount": 35000.0, "concept": "pago"},
+        "args": {
+            "user_id": user_id,
+            "source_account": "acc_001",
+            "destination_account": "[CBU_BANCARIO_1]",
+            "amount": 35000.0,
+            "concept": "pago",
+        },
         "id": "call_tx_1",
     }
     state = {
         "session_id": "sess_stage_01",
         "user_id": user_id,
-        "execution_plan": [{"step_id": 1, "title": "t", "target_node": "action_agent",
-                            "description": "Transferir 35000 ARS a [CBU_BANCARIO_1]", "result": None}],
+        "execution_plan": [
+            {
+                "step_id": 1,
+                "title": "t",
+                "target_node": "action_agent",
+                "description": "Transferir 35000 ARS a [CBU_BANCARIO_1]",
+                "result": None,
+            }
+        ],
     }
     result = _run_action_agent(
         [AIMessage(content="", tool_calls=[transfer_call]), AIMessage(content="Transferencia solicitada.")],
@@ -165,8 +186,15 @@ def test_action_agent_stages_recipient_registration_for_pep():
     state = {
         "session_id": "sess_reg_01",
         "user_id": user_id,
-        "execution_plan": [{"step_id": 1, "title": "t", "target_node": "action_agent",
-                            "description": f"Registrar a Destinatario Test con CBU {cbu}", "result": None}],
+        "execution_plan": [
+            {
+                "step_id": 1,
+                "title": "t",
+                "target_node": "action_agent",
+                "description": f"Registrar a Destinatario Test con CBU {cbu}",
+                "result": None,
+            }
+        ],
     }
     result = _run_action_agent(
         [AIMessage(content="", tool_calls=[register_call]), AIMessage(content="Destinatario registrado.")],
@@ -188,8 +216,11 @@ def test_action_agent_tool_error_is_returned_to_the_model_and_loop_continues():
         "id": "call_bad",
     }
     state = {
-        "session_id": "sess_tool_error", "user_id": "user_default_01",
-        "execution_plan": [{"step_id": 1, "title": "t", "target_node": "action_agent", "description": "d", "result": None}],
+        "session_id": "sess_tool_error",
+        "user_id": "user_default_01",
+        "execution_plan": [
+            {"step_id": 1, "title": "t", "target_node": "action_agent", "description": "d", "result": None}
+        ],
     }
     result = _run_action_agent(
         [AIMessage(content="", tool_calls=[bad_call]), AIMessage(content="No pude registrar: el CBU es inválido.")],

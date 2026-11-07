@@ -1,7 +1,7 @@
 """
 Tests for Cloud DLP Sanitizer and Model Armor Guardrails.
 """
-import pytest
+
 from app.core.dlp_sanitizer import dlp_sanitizer
 from app.core.model_armor import model_armor
 from app.core.security_context import token_vault
@@ -70,6 +70,7 @@ def test_seed_document_passes_model_armor():
 
 def test_document_dlp_cbu_tokenization():
     import re
+
     from app.core.document_loader import document_ingestion_service
 
     session_id = "test_sess_doc_dlp"

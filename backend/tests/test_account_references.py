@@ -1,11 +1,12 @@
 """Offline tests for account reference handling in agent tools and for MCP-backed read tools."""
+
 import pytest
+from mcp_financial_action_server.storage import financial_storage
 
 from app.core.mcp_action_client import mcp_action_client
 from app.core.security_context import normalize_account_reference, token_vault
 from app.graph.tools.banking_read import get_account_balances, get_recent_transactions
 from app.graph.tools.banking_write import execute_register_recipient, transfer_funds_tool
-from mcp_financial_action_server.storage import financial_storage
 
 CBU = "0170099900000012345678"
 
@@ -17,15 +18,18 @@ def clean_state():
     financial_storage.reset_state()
 
 
-@pytest.mark.parametrize("value,expected", [
-    (CBU, CBU),
-    ("[CBU_BANCARIO_1]", "[CBU_BANCARIO_1]"),
-    ("CBU_BANCARIO_1", "[CBU_BANCARIO_1]"),
-    (" [ CBU_BANCARIO_2 ] ", "[CBU_BANCARIO_2]"),
-    ("mi.alias.banco", "mi.alias.banco"),
-    ("", ""),
-    (None, ""),
-])
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (CBU, CBU),
+        ("[CBU_BANCARIO_1]", "[CBU_BANCARIO_1]"),
+        ("CBU_BANCARIO_1", "[CBU_BANCARIO_1]"),
+        (" [ CBU_BANCARIO_2 ] ", "[CBU_BANCARIO_2]"),
+        ("mi.alias.banco", "mi.alias.banco"),
+        ("", ""),
+        (None, ""),
+    ],
+)
 def test_normalize_account_reference(value, expected):
     assert normalize_account_reference(value) == expected
 
@@ -61,8 +65,11 @@ def test_read_tools_are_served_by_the_mcp_server():
     assert {a["account_id"] for a in balances} == {"acc_001", "acc_002"}
 
     mcp_action_client.execute_approved_transfer(
-        user_id="user_default_01", source_account_id="acc_001",
-        destination_cbu_or_alias="0170099220000067891234", amount=500.0, idempotency_key="refs-read-1",
+        user_id="user_default_01",
+        source_account_id="acc_001",
+        destination_cbu_or_alias="0170099220000067891234",
+        amount=500.0,
+        idempotency_key="refs-read-1",
     )
     after = {a["account_id"]: a["balance"] for a in get_account_balances.invoke({"user_id": "user_default_01"})}
     assert after["acc_001"] == 484750.75

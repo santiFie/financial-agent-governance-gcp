@@ -3,20 +3,23 @@ LangGraph Multi-Agent Financial Assistant Graph Definition.
 Orchestrates Defense-in-Depth layers:
 Sanitizer Node -> Router Node -> (Read-Only DB Agent | Action Agent HITL) -> END.
 """
+
 from typing import Literal
+
 from langchain_core.messages import AIMessage
+from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
-from langgraph.graph import StateGraph, START, END
-from app.graph.state import AgentState
-from app.graph.nodes.sanitizer import sanitizer_node
-from app.graph.nodes.router import router_node
-from app.graph.nodes.readonly_agent import readonly_agent_node
+
+from app.db.checkpointer import checkpointer
+from app.graph.agent_registry import AGENT_REGISTRY, TargetNode
 from app.graph.nodes.action_agent import action_agent_node
 from app.graph.nodes.pep import pep_node
-from app.graph.agent_registry import AGENT_REGISTRY, TargetNode
+from app.graph.nodes.readonly_agent import readonly_agent_node
+from app.graph.nodes.router import router_node
+from app.graph.nodes.sanitizer import sanitizer_node
 from app.graph.plan_utils import get_active_step
+from app.graph.state import AgentState
 from app.graph.tools.document_reader import read_document_tool
-from app.db.checkpointer import checkpointer
 
 
 def route_after_sanitizer(state: AgentState) -> Literal["router", "__end__"]:
@@ -67,14 +70,7 @@ def build_financial_graph():
     # 2. Add edges
     workflow.add_edge(START, "sanitizer")
 
-    workflow.add_conditional_edges(
-        "sanitizer",
-        route_after_sanitizer,
-        {
-            "router": "router",
-            END: END
-        }
-    )
+    workflow.add_conditional_edges("sanitizer", route_after_sanitizer, {"router": "router", END: END})
 
     workflow.add_conditional_edges(
         "router",
@@ -83,8 +79,8 @@ def build_financial_graph():
             "orchestrator_tools": "orchestrator_tools",
             "readonly_agent": "readonly_agent",
             "action_agent": "action_agent",
-            END: END
-        }
+            END: END,
+        },
     )
 
     # Orchestrator loop edges: return control to router after each step execution
@@ -92,7 +88,6 @@ def build_financial_graph():
     workflow.add_edge("readonly_agent", "router")
     workflow.add_edge("action_agent", "pep_node")
     workflow.add_edge("pep_node", "router")
-
 
     # 3. Compile with Checkpointer
     return workflow.compile(checkpointer=checkpointer)

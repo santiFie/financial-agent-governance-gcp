@@ -3,8 +3,11 @@ Read-Only Banking Tools.
 These tools only query account information and statement data.
 They have zero modification capabilities, enforcing the Least-Privilege principle.
 """
-from typing import List, Dict, Any
+
+from typing import Any
+
 from langchain_core.tools import tool
+
 from app.core.mcp_action_client import mcp_action_client
 
 

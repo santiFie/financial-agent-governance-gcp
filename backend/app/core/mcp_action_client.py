@@ -3,24 +3,24 @@ MCP Action Client.
 Integrates the Action Agent and Backend with the FastMCP Financial Action Server.
 Enforces that critical tools are only executed following HITL approval.
 """
-from typing import Dict, Any, List, Optional
+
 import os
 import sys
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 _workspace_root = str(Path(__file__).resolve().parent.parent.parent.parent)
 if _workspace_root not in sys.path:
     sys.path.insert(0, _workspace_root)
 
-from mcp_financial_action_server.server import (
-    execute_bank_transfer,
-    register_destination_account,
-    schedule_direct_debit,
+from mcp_financial_action_server.server import (  # noqa: E402
     cancel_scheduled_debit,
+    execute_bank_transfer,
     get_account_balances,
     get_recent_transactions,
+    register_destination_account,
+    schedule_direct_debit,
 )
-
 
 MCP_SERVER_URL = os.getenv("MCP_ACTION_SERVER_URL", "http://localhost:8001")
 
@@ -114,12 +114,7 @@ class MCPActionClient:
         )
 
     @classmethod
-    def is_trusted_recipient(
-        cls,
-        user_id: str,
-        destination: str,
-        session_id: Optional[str] = None
-    ) -> "AwaitableBool":
+    def is_trusted_recipient(cls, user_id: str, destination: str, session_id: Optional[str] = None) -> "AwaitableBool":
         """
         Queries FastMCP financial_storage address book to verify if destination
         (CBU, CVU, alias, account_number, or surrogate token) is registered as a trusted recipient for user_id.
@@ -130,6 +125,7 @@ class MCPActionClient:
             return AwaitableBool(False)
 
         from mcp_financial_action_server.storage import financial_storage
+
         from app.core.security_context import token_vault
 
         clean_dest = destination.strip()
@@ -173,6 +169,7 @@ class MCPActionClient:
 
 class AwaitableBool:
     """Helper enabling dual async/await and synchronous boolean evaluation."""
+
     def __init__(self, value: bool):
         self._val = bool(value)
 
@@ -187,6 +184,7 @@ class AwaitableBool:
     def __await__(self):
         async def _coro():
             return self._val
+
         return _coro().__await__()
 
     def __repr__(self) -> str:
@@ -195,4 +193,3 @@ class AwaitableBool:
 
 # Global singleton client instance
 mcp_action_client = MCPActionClient()
-
