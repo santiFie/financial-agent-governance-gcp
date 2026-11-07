@@ -14,11 +14,13 @@ logger = logging.getLogger(__name__)
 
 READONLY_TOOLS = [get_account_balances, get_recent_transactions]
 
-llm = get_chat_model(temperature=0.0)
-_react_executor = create_react_agent(
-    model=llm,
-    tools=READONLY_TOOLS,
-)
+
+def _build_executor():
+    """ReAct executor over the read tools. Built per call so importing the graph needs no LLM credentials."""
+    llm = get_chat_model(temperature=0.0)
+    if llm is None:
+        raise RuntimeError("Read-Only Agent: no hay credenciales LLM configuradas.")
+    return create_react_agent(model=llm, tools=READONLY_TOOLS)
 
 
 def _extract_text(content: Any) -> str:
@@ -49,7 +51,7 @@ def readonly_agent_node(state: AgentState, config: Optional[RunnableConfig] = No
     configurable["user_id"] = user_id
     exec_config["configurable"] = configurable
 
-    result = _react_executor.invoke(
+    result = _build_executor().invoke(
         {
             "messages": [
                 {"role": "system", "content": system_prompt},

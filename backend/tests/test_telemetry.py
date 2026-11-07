@@ -6,6 +6,7 @@ import uuid
 from fastapi.testclient import TestClient
 from app.main import app
 from app.core.telemetry import build_trace_config, get_telemetry_status
+from tests.live_llm import requires_live_llm
 
 client = TestClient(app)
 
@@ -65,6 +66,7 @@ def test_health_endpoint_exposes_telemetry():
     assert data["telemetry"]["provider"] == "LangSmith"
 
 
+@requires_live_llm
 def test_chat_endpoint_populates_trace_id_in_audit():
     """Validates /api/chat returns trace_id in SecurityMetadata."""
     response = client.post("/api/chat", json={
