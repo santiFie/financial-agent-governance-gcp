@@ -6,3 +6,6 @@ images:
   - "${_IMAGE}"
 substitutions:
   _IMAGE: ""
+options:
+  # Required when the build runs with a user-specified service account (--service-account).
+  logging: CLOUD_LOGGING_ONLY

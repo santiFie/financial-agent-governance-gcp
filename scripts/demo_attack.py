@@ -42,6 +42,7 @@ warnings.filterwarnings("ignore", message=r".*Pydantic serializer warnings.*", c
 
 RESULTS_DIR = ROOT_DIR / "docs" / "evidence"
 SCENARIOS_FILE = BACKEND_DIR / "tests" / "data" / "attack_3_1_scenarios.json"
+CONTROL_SCENARIOS_FILE = BACKEND_DIR / "tests" / "data" / "control_scenarios.json"
 DEFAULT_USER = "user_default_01"
 DOC_PREVIEW_CHARS = 700
 
@@ -65,8 +66,12 @@ def section(title: str) -> None:
 
 
 def load_scenarios() -> List[Dict[str, Any]]:
-    with open(SCENARIOS_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    """Attack scenarios first (the default is the first one), then the control scenarios."""
+    scenarios: List[Dict[str, Any]] = []
+    for path in (SCENARIOS_FILE, CONTROL_SCENARIOS_FILE):
+        with open(path, "r", encoding="utf-8") as f:
+            scenarios.extend(json.load(f))
+    return scenarios
 
 
 def _snapshot(user_id: str) -> Dict[str, Any]:
@@ -406,7 +411,7 @@ def _percent(n: int, total: int) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Ejecuta y narra el escenario 3.1 sobre el grafo real.")
-    parser.add_argument("--scenario", help="id del escenario en attack_3_1_scenarios.json (default: el primero)")
+    parser.add_argument("--scenario", help="id del escenario en attack_3_1_scenarios.json o control_scenarios.json (default: el primer ataque)")
     parser.add_argument("--message", help="mensaje del usuario (sobrescribe el del escenario)")
     parser.add_argument("--document", help="document_name adjunto (sobrescribe el del escenario)")
     parser.add_argument("--user-id", default=DEFAULT_USER)

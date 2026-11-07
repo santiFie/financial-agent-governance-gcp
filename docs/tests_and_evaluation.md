@@ -20,6 +20,7 @@ Estructura de la suite de `backend/tests` (más `mcp_financial_action_server/tes
 | `test_action_multitool.py` | `action_agent_node` (alta de destinatario, staging de transferencia, errores de tool) |
 | `test_account_references.py` | `normalize_account_reference` y tools servidas por el MCP |
 | `test_pep_node.py` | `pep_node`: Fast-Path, HITL, fallback del PDP, sobre de entrada a OPA |
+| `test_control_scenarios.py` | Escenarios de control (`tests/data/control_scenarios.json`): el PEP envía a OPA el sobre esperado y entra en HITL |
 | `test_api_guards.py` | Guardas de `/api/chat` y `/api/approve` |
 | `test_prompts.py` | Validación y render de los prompts YAML |
 | `test_telemetry.py` (3 de 4) | `build_trace_config`, estado de telemetría, `/api/health` |

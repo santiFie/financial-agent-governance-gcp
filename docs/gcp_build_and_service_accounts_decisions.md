@@ -132,9 +132,12 @@ Al incorporar [`backend/.gcloudignore`](../backend/.gcloudignore), el paquete se
 El comando validado para enviar la imagen a Cloud Build bajo la configuración de seguridad establecida es:
 
 ```bash
-gcloud builds submit backend \
+gcloud builds submit . \
+    --config deploy/cloudbuild-backend.yaml \
+    --substitutions _IMAGE=us-central1-docker.pkg.dev/ai-security-508122/financial-assitant-repository/backend:v1 \
     --service-account="projects/ai-security-508122/serviceAccounts/sa-cloud-build@ai-security-508122.iam.gserviceaccount.com" \
     --default-buckets-behavior=regional-user-owned-bucket \
-    --region=us-central1 \
-    --tag us-central1-docker.pkg.dev/ai-security-508122/financial-assitant-repository/backend:v1
+    --region=us-central1
 ```
+
+> **Actualización:** la versión anterior de este comando usaba `gcloud builds submit backend --tag ...`. Ya no sirve: `backend/Dockerfile` copia `mcp_financial_action_server/` y `backend/...` con rutas relativas a la raíz del repo, por lo que el contexto debe ser `.` y el build debe usar `deploy/cloudbuild-backend.yaml`. Este comando no se volvió a ejecutar contra GCP tras el cambio. El `.gcloudignore` aplicable es el de la raíz del repo.
