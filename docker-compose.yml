@@ -17,6 +17,9 @@ services:
       - TOKEN_VAULT_SECRET=${TOKEN_VAULT_SECRET:-development-secret-key-32-chars!}
       - PDP_URL=${PDP_URL:-http://opa:8181/v1/data/transaction/decision}
       - LLM_PROVIDER=${LLM_PROVIDER:-litellm}
+      - LLM_MODEL=${LLM_MODEL:-}
+      - ORCHESTRATOR_PROVIDER=${ORCHESTRATOR_PROVIDER:-}
+      - ORCHESTRATOR_MODEL=${ORCHESTRATOR_MODEL:-}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
@@ -28,6 +31,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app:ro
+      - ./backend/local_storage:/app/local_storage:ro
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" ]

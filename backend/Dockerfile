@@ -43,6 +43,9 @@ COPY --from=builder /opt/venv /opt/venv
 # Copy application source code
 COPY --chown=appuser:appgroup backend/app /app/app
 
+# Simulated bucket documents (read by read_document_tool; also mounted read-only by docker-compose)
+COPY --chown=appuser:appgroup backend/local_storage /app/local_storage
+
 # MCP action server package (imported in-process by app/core/mcp_action_client.py)
 COPY --chown=appuser:appgroup mcp_financial_action_server /app/mcp_financial_action_server
 
