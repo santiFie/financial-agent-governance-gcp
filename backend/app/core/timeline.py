@@ -97,7 +97,7 @@ class TimelineBuilder:
                       _compact(u.get("final_response"), 300))
 
     def _on_pep_node(self, u: Dict[str, Any]) -> None:
-        # A step that staged no transfer (e.g. registering a recipient) crosses pep_node without a decision.
+        # Nothing was staged: pep_node crossed without asking the PDP.
         if len(self._pdp_decisions) == self._pdp_reported and not u.get("final_response"):
             return
         self._pdp_reported = len(self._pdp_decisions)

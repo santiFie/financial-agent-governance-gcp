@@ -68,3 +68,27 @@ def test_builder_skips_pep_node_when_no_transfer_was_staged():
     b = TimelineBuilder()
     b.add_update("pep_node", {"status": "COMPLETED", "approval_status": "NONE"})
     assert b.events == []
+
+
+def test_pdp_observer_also_receives_the_decision_for_a_recipient_registration():
+    from unittest.mock import MagicMock, patch
+    from app.graph.nodes.pep import pep_node
+    from mcp_financial_action_server.storage import financial_storage
+
+    financial_storage.reset_state()
+    seen = []
+    allow = MagicMock(status_code=200)
+    allow.json.return_value = {"result": {"allow": True, "require_hitl": False, "reason": "Herramienta sin movimiento de fondos"}}
+    state = {"session_id": "sess_tl_reg", "user_id": "user_default_01",
+             "pending_tool_calls": [{"name": "register_recipient_tool",
+                                     "args": {"recipient_name": "X", "cbu": "0170099900000012345678"}}]}
+
+    token = pdp_decision_observer.set(seen.append)
+    try:
+        with patch("httpx.Client.post", return_value=allow):
+            pep_node(state)
+    finally:
+        pdp_decision_observer.reset(token)
+        financial_storage.reset_state()
+
+    assert seen and seen[0]["input"]["tool_name"] == "register_recipient_tool"

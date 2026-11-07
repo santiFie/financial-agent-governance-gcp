@@ -114,9 +114,7 @@ def _govern_registration(state: AgentState, call: Dict[str, Any], user_id: str, 
     """
     from app.graph.tools.banking_write import execute_register_recipient
 
-    decision = _query_pdp({"user_id": user_id, "tool_name": REGISTER_TOOL})
-    if decision is None:
-        decision = _pdp_fallback_decision()
+    decision = _decide({"user_id": user_id, "tool_name": REGISTER_TOOL})
     if not decision.get("allow", False):
         raise PermissionError(decision.get("reason", "Operación bloqueada por política de seguridad"))
     if decision.get("require_hitl", False):
@@ -132,6 +130,17 @@ def _govern_registration(state: AgentState, call: Dict[str, Any], user_id: str, 
         f"• **Cuenta:** `{normalize_account_reference(args.get('cbu') or args.get('cbu_or_cvu'))}`\n"
         f"• **Gobernanza PEP:** herramienta sin movimiento de fondos autorizada por el PDP."
     )
+
+
+def _decide(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """PDP decision for a staged tool call (local fallback when the PDP cannot answer), reported to the observer."""
+    decision = _query_pdp(payload)
+    if decision is None:
+        decision = _pdp_fallback_decision()
+    observer = pdp_decision_observer.get()
+    if observer:  # observability only: reports the decision, never alters it
+        observer({"input": payload, "decision": decision})
+    return decision
 
 
 def pep_node(state: AgentState) -> AwaitableDict:
@@ -256,13 +265,7 @@ def _govern_transfer(
         "is_trusted_recipient": is_trusted
     }
 
-    pdp_decision = _query_pdp(pdp_payload)
-    if pdp_decision is None:
-        pdp_decision = _pdp_fallback_decision()
-
-    observer = pdp_decision_observer.get()
-    if observer:  # observability only: reports the decision, never alters it
-        observer({"input": pdp_payload, "decision": pdp_decision})
+    pdp_decision = _decide(pdp_payload)
 
     # Evaluate PDP Decision
     if not pdp_decision.get("allow", False):
