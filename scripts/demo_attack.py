@@ -24,6 +24,7 @@ import logging
 import os
 import sys
 import uuid
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from unittest.mock import patch
@@ -33,6 +34,10 @@ BACKEND_DIR = ROOT_DIR / "backend"
 for _p in (ROOT_DIR, BACKEND_DIR):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
+
+# langchain-litellm responses carry provider fields (e.g. reasoning tokens) that pydantic's serializer reports as
+# warnings on every LLM call. They are harmless noise for the narration, so they are silenced for this script only.
+warnings.filterwarnings("ignore", message=r".*Pydantic serializer warnings.*", category=UserWarning)
 
 SCENARIOS_FILE = BACKEND_DIR / "tests" / "data" / "attack_3_1_scenarios.json"
 DEFAULT_USER = "user_default_01"
@@ -119,6 +124,8 @@ class Narrator:
         self.verbose = verbose
         self.seen_steps = 0
         self.plan: List[Dict[str, Any]] = []
+        self.event_no = 0
+        self._pdp_reported = 0
         self.initial_plan: List[Dict[str, Any]] = []
         self.replanned: List[Dict[str, Any]] = []
         self.staged: List[Dict[str, Any]] = []
@@ -133,6 +140,16 @@ class Narrator:
         if self.verbose:
             print(text)
 
+    def section(self, title: str) -> None:
+        """Events are numbered in the order they happen (the graph loops between planning and execution)."""
+        self.event_no += 1
+        if self.verbose:
+            section(f"{self.event_no}. {title}")
+
+    def _active_step_label(self) -> str:
+        step = next((st for st in self.plan if st.get("result") is None), None)
+        return f"paso {step['step_id']}" if step else "sin paso activo"
+
     def on_update(self, node: str, update: Dict[str, Any]) -> None:
         if node == "__interrupt__":
             self.paused_for_hitl = True
@@ -144,12 +161,14 @@ class Narrator:
         handler = getattr(self, f"_on_{node}", None)
         if handler:
             handler(update)
+        if update.get("execution_plan") is not None:
+            self.plan = list(update["execution_plan"])
         for key in ("final_response", "status"):
             if update.get(key) is not None:
                 setattr(self, key, update[key])
 
     def _on_sanitizer(self, u: Dict[str, Any]) -> None:
-        section("1. Sanitizer (DLP + Model Armor sobre el pedido)")
+        self.section("Sanitizer (DLP + Model Armor sobre el pedido)")
         pii = u.get("detected_pii") or []
         self.out(f"defense_action={u.get('defense_action')}  is_threat={u.get('is_threat')}  PII tokenizada={len(pii)}")
         self.out(f"input saneado: {_short(u.get('sanitized_input'), 300)}")
@@ -161,13 +180,13 @@ class Narrator:
         for msg in u.get("orchestrator_scratchpad") or []:
             for call in getattr(msg, "tool_calls", None) or []:
                 if call.get("name") == "read_document_tool":
-                    section("2. Orquestador pide leer el documento adjunto")
+                    self.section("Orquestador pide leer el documento adjunto")
                     self.out(f"read_document_tool({_short(call.get('args'))})")
         plan = u.get("execution_plan")
         if plan is not None and len(plan) > self.seen_steps:
             new = plan[self.seen_steps:]
             first = self.seen_steps == 0
-            section("3. Plan inicial del Orquestador" if first else "5. REPLAN: el Orquestador agregó pasos")
+            self.section("Plan inicial del Orquestador" if first else "REPLAN: el Orquestador agregó pasos")
             for step in new:
                 marker = "" if first else red("  ← agregado al replanificar")
                 self.out(f"  [{step['step_id']}] {step['target_node']:<14} {bold(step['title'])}{marker}")
@@ -192,11 +211,11 @@ class Narrator:
             self.out(green("✔ El documento pasó los filtros y entró como contexto."))
 
     def _on_readonly_agent(self, u: Dict[str, Any]) -> None:
-        section("4. readonly_agent (lectura)")
+        self.section(f"readonly_agent [{self._active_step_label()}]")
         self.out(_short(u.get("final_response"), 400))
 
     def _on_action_agent(self, u: Dict[str, Any]) -> None:
-        section("6. action_agent")
+        self.section(f"action_agent [{self._active_step_label()}]")
         calls = u.get("pending_tool_calls") or []
         for call in calls:
             self.staged.append(call)
@@ -205,7 +224,11 @@ class Narrator:
             self.out(_short(u.get("final_response") or "(paso completado sin transferencia en staging)", 300))
 
     def _on_pep_node(self, u: Dict[str, Any]) -> None:
-        section("7. pep_node (Policy Enforcement Point)")
+        # A step that staged no transfer (e.g. registering a recipient) passes through pep_node without a decision.
+        if len(self.pdp_decisions) == self._pdp_reported and not u.get("final_response"):
+            return
+        self.section(f"pep_node (Policy Enforcement Point) [{self._active_step_label()}]")
+        self._pdp_reported = len(self.pdp_decisions)
         if self.pdp_decisions:
             d = self.pdp_decisions[-1]
             self.out(f"Entrada a OPA: {_short(d['input'])}")

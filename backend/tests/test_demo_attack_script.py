@@ -36,3 +36,19 @@ def test_narrator_marks_hitl_pause_and_threat():
     n.on_update("sanitizer", {"is_threat": True, "threat_category": "X", "defense_action": "BLOCKED"})
     assert n.paused_for_hitl
     assert n.threat == "X"
+
+
+def test_events_are_numbered_chronologically_and_pep_noop_is_skipped(capsys):
+    demo = _load()
+    n = demo.Narrator(verbose=True)
+    plan = [_step(1, "action_agent"), _step(2, "readonly_agent")]
+    n.on_update("router", {"execution_plan": plan})
+    n.on_update("action_agent", {"final_response": "registrado",
+                                 "execution_plan": [{**plan[0], "result": "ok"}, plan[1]]})
+    n.on_update("pep_node", {"status": "COMPLETED", "approval_status": "NONE"})  # no transfer staged: nothing to report
+    n.on_update("readonly_agent", {"final_response": "r"})
+
+    out = capsys.readouterr().out
+    assert "2. action_agent [paso 1]" in out
+    assert "3. readonly_agent [paso 2]" in out
+    assert "pep_node" not in out
