@@ -4,8 +4,9 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-multi--agente-blue.svg)](https://langchain-ai.github.io/langgraph/)
 [![React](https://img.shields.io/badge/React-18-61DAFB.svg?logo=react)](https://react.dev)
 [![OPA](https://img.shields.io/badge/OPA-PDP-7D9199.svg)](https://www.openpolicyagent.org)
+[![CI](https://github.com/santiFie/financial_asistent/actions/workflows/ci.yml/badge.svg)](https://github.com/santiFie/financial_asistent/actions/workflows/ci.yml)
 
-> **Esta PoC es deliberadamente vulnerable.** Reproduce un ataque tal como lo describe el informe y no incluye defensas semánticas. No la despliegues con credenciales ni fondos reales.
+> **Esta PoC es deliberadamente vulnerable.** Reproduce un ataque tal como lo describe el informe y no incluye defensas semánticas. No la despliegues con credenciales ni fondos reales. Uso académico: ver [`LICENSE`](LICENSE).
 
 Asistente bancario multi-agente (FastAPI + LangGraph + servidor de acciones FastMCP + React) construido para el trabajo final del posgrado *Seguridad y Gobernanza en Agentes de IA*. Los controles de seguridad viven en capas determinísticas de código e infraestructura (DLP, filtros léxicos, PEP/PDP con OPA, HITL), no en instrucciones del prompt.
 
@@ -103,6 +104,7 @@ make test        # suite completa (usa backend/.venv)
 - **Offline** (no necesitan red ni claves): casi toda la suite, incluidos PEP, sanitizer, plan/replan del Orchestrator con LLM simulado, servidor MCP y los escenarios de control.
 - **Con LLM real** (se omiten sin credenciales): `test_orchestrator_evals.py`, `test_readonly_agent_evals.py`, `test_action_agent_evals.py` y `test_attack_3_1_e2e_evals.py`. Algunos suben resultados a LangSmith si hay `LANGSMITH_API_KEY`.
 - Política OPA: `opa test policies/`.
+- Calidad: `cd backend && ruff check . ../mcp_financial_action_server ../scripts && ruff format --check .` (los mismos pasos corren en GitHub Actions, `.github/workflows/ci.yml`).
 
 La matriz completa y el registro de fallos con modelo real están en [`docs/tests_and_evaluation.md`](docs/tests_and_evaluation.md).
 

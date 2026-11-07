@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  backend:
+    name: Backend (ruff + offline tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r backend/requirements.txt
+      - name: Lint
+        working-directory: backend
+        run: ruff check . ../mcp_financial_action_server ../scripts
+      - name: Format check
+        working-directory: backend
+        run: ruff format --check . ../mcp_financial_action_server ../scripts
+      - name: Offline tests (live-LLM evals skip without credentials)
+        working-directory: backend
+        env:
+          GROQ_API_KEY: ""
+          NVIDIA_API_KEY: ""
+          GEMINI_API_KEY: ""
+          OPENAI_API_KEY: ""
+          OPENROUTER_API_KEY: ""
+          LANGCHAIN_API_KEY: ""
+          LANGSMITH_API_KEY: ""
+        run: python -m pytest tests ../mcp_financial_action_server/tests -q -p no:cacheprovider
+
+  policies:
+    name: OPA policy tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker run --rm -v "$PWD/policies:/policies:ro" openpolicyagent/opa:1.4.2-static test /policies -v
+
+  frontend:
+    name: Frontend (typecheck + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - working-directory: frontend
+        run: npm install
+      - working-directory: frontend
+        run: npm run build
