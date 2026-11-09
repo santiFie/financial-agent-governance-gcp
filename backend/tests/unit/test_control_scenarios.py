@@ -14,7 +14,7 @@ from mcp_financial_action_server.storage import financial_storage
 from app.core.security_context import token_vault
 from app.graph.nodes.pep import pep_node
 
-DATA = Path(__file__).parent / "data"
+DATA = Path(__file__).resolve().parent.parent / "data"
 CONTROLS = json.loads((DATA / "control_scenarios.json").read_text(encoding="utf-8"))
 ATTACKS = json.loads((DATA / "attack_3_1_scenarios.json").read_text(encoding="utf-8"))
 

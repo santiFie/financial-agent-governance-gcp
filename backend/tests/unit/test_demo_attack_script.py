@@ -3,7 +3,7 @@
 import importlib.util
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parent.parent.parent / "scripts" / "demo_attack.py"
+SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "demo_attack.py"
 
 
 def _load():

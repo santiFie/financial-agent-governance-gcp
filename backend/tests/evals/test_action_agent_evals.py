@@ -20,8 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # Ensure both backend and workspace root are in sys.path
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-BACKEND_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parents[3]
+BACKEND_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 if str(BACKEND_DIR) not in sys.path:
@@ -49,7 +49,7 @@ from tests.decision_models_evaluators import (
 
 logger = logging.getLogger(__name__)
 
-GROUND_TRUTH_FILE_PATH = Path(__file__).parent / "data" / "action_agent_ground_truth.json"
+GROUND_TRUTH_FILE_PATH = Path(__file__).resolve().parent.parent / "data" / "action_agent_ground_truth.json"
 DATASET_NAME = os.getenv("LANGSMITH_ACTION_DATASET", "action-agent-planstep-evals")
 
 
