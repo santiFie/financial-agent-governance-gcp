@@ -48,7 +48,8 @@ def test_model_armor_uses_local_guard_unless_gcp_is_enabled():
 
 def test_model_armor_uses_gcp_runnable_when_enabled_and_templated():
     runnable = MagicMock()
-    runnable.invoke.return_value = {"is_threat": True, "threat_category": "GCP_CAT", "threat_reason": "r"}
+    # The real runnable raises ValueError when Model Armor flags the text (it never returns a threat dict).
+    runnable.invoke.side_effect = ValueError("Prompt flagged as unsafe by Model Armor.")
     fake_module = MagicMock()
     fake_module.ModelArmorSanitizePromptRunnable.return_value = runnable
     with (
@@ -58,7 +59,7 @@ def test_model_armor_uses_gcp_runnable_when_enabled_and_templated():
     ):
         guard = HybridModelArmorGuard()
         assert guard._get_runnable() is runnable
-        assert guard.inspect("texto") == (True, "GCP_CAT", "r")
+        assert guard.inspect("texto") == (True, "MODEL_ARMOR_VIOLATION", "Prompt flagged as unsafe by Model Armor.")
 
 
 def test_production_refuses_the_default_vault_secret():
