@@ -9,13 +9,31 @@ Document Ingestion Service.
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
+
+from langchain_core.document_loaders import BaseLoader
+from langchain_core.documents import Document
 
 from app.config import settings
+from app.core.service_status import GCP, LOCAL, LOCAL_FALLBACK, service_status
 
 logger = logging.getLogger(__name__)
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
+
+
+class PlainTextLoader(BaseLoader):
+    """
+    Reads a downloaded file as UTF-8 text. GCSFileLoader defaults to UnstructuredFileLoader, which needs the
+    langchain-community package (not a dependency here); the attached documents are plain text.
+    """
+
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+
+    def load(self) -> List[Document]:
+        text = Path(self.file_path).read_text(encoding="utf-8")
+        return [Document(page_content=text, metadata={"source": self.file_path})]
 
 
 class DocumentIngestionService:
@@ -55,11 +73,20 @@ class DocumentIngestionService:
             try:
                 content = self._load_from_gcs(filename)
                 if content:
+                    service_status.record("gcs", GCP)
                     return content
+                reason = "empty object"
             except Exception as e:
-                logger.warning(
-                    f"Documento '{filename}' no disponible en GCS ({e}). Usando el documento de local_storage."
-                )
+                reason = f"{type(e).__name__}: {e}"
+            logger.warning(
+                "[GCS] Documento '%s' no disponible en gs://%s (%s): se usa el documento LOCAL de local_storage.",
+                filename,
+                self.gcs_bucket,
+                reason,
+            )
+            service_status.record("gcs", LOCAL_FALLBACK, reason)
+        else:
+            service_status.record("gcs", LOCAL)
         return self._load_from_local()
 
     @staticmethod
@@ -78,7 +105,12 @@ class DocumentIngestionService:
     def _load_from_gcs(self, filename: str) -> str:
         from langchain_google_community import GCSFileLoader
 
-        loader = GCSFileLoader(project_name=settings.gcp_project_id, bucket=self.gcs_bucket, blob=filename)
+        loader = GCSFileLoader(
+            project_name=settings.gcp_project_id,
+            bucket=self.gcs_bucket,
+            blob=filename,
+            loader_func=PlainTextLoader,
+        )
         docs = loader.load()
         return docs[0].page_content if docs else ""
 

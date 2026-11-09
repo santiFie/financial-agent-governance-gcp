@@ -41,12 +41,15 @@ SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 # ------------------------------------------------------------------------------
 # PASO 1: CREAR LA SERVICE ACCOUNT DEDICADA
 # ------------------------------------------------------------------------------
-gcloud iam service-accounts create $SA_NAME \
-  --description="Service Account para el asistente financiero multi-agente con permisos mínimos" \
-  --display-name="SA Financial Assistant" \
-  --project="$PROJECT_ID"
-
-echo "[PASO 1] Service Account ya creada..."
+if gcloud iam service-accounts describe "$SA_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1; then
+  echo "[PASO 1] La Service Account $SA_EMAIL ya existe: no se vuelve a crear."
+else
+  gcloud iam service-accounts create "$SA_NAME" \
+    --description="Service Account para el asistente financiero multi-agente con permisos mínimos" \
+    --display-name="SA Financial Assistant" \
+    --project="$PROJECT_ID"
+  echo "[PASO 1] Service Account $SA_EMAIL creada."
+fi
 
 
 # ------------------------------------------------------------------------------
@@ -93,12 +96,15 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
 # PASO 4c: ACCESO AL SECRETO DEL TOKEN VAULT (Secret Manager)
 # ------------------------------------------------------------------------------
 # El secreto "token-vault-secret" debe existir (docs/gcp_deployment_and_iam.md, Paso 2.b).
-echo "[PASO 4c] Permitiendo leer el secreto token-vault-secret..."
-
-gcloud secrets add-iam-policy-binding token-vault-secret \
-  --project="$PROJECT_ID" \
-  --member="serviceAccount:$SA_EMAIL" \
-  --role="roles/secretmanager.secretAccessor"
+if gcloud secrets describe token-vault-secret --project="$PROJECT_ID" >/dev/null 2>&1; then
+  echo "[PASO 4c] Permitiendo leer el secreto token-vault-secret..."
+  gcloud secrets add-iam-policy-binding token-vault-secret \
+    --project="$PROJECT_ID" \
+    --member="serviceAccount:$SA_EMAIL" \
+    --role="roles/secretmanager.secretAccessor"
+else
+  echo "[PASO 4c] ⚠️  El secreto token-vault-secret no existe: se omite (solo hace falta para Cloud Run, ver docs/gcp_deployment_and_iam.md, Paso 2.b)."
+fi
 
 # ------------------------------------------------------------------------------
 # PASO 5: VERIFICACIÓN FINAL
