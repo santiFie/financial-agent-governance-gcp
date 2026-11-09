@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     # - "firestore": Cloud Firestore (scalable, zero idle cost in GCP Free Tier)
     checkpointer_type: Literal["memory", "firestore"] = "memory"
     firestore_collection: str = "langgraph_checkpoints"
+    # Optional: seconds until a checkpoint document expires (field `expire_at`, usable by a Firestore TTL policy).
+    firestore_checkpoint_ttl_seconds: Optional[int] = None
 
     # Secret key for the reversible token vault (never leaked to LLM).
     # The default is for local development only: ENVIRONMENT=production refuses to start with it.
