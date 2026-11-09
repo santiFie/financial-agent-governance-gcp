@@ -1,6 +1,6 @@
 """Offline tests for DocumentIngestionService (local_storage vs GCS with local fallback)."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -67,3 +67,74 @@ def test_gcs_flag_without_bucket_uses_local(local_doc):
     with patch("app.core.document_loader.settings") as s:
         s.gcs_bucket_name = None
         assert service.load_document("doc.txt") == "contenido local"
+
+
+# --- GCSFileLoader end to end with a fake google-cloud-storage client ----------------------------------------------
+
+
+class _FakeBlob:
+    def __init__(self, content):
+        self.content, self.metadata = content, None
+
+    def download_to_filename(self, path):
+        from pathlib import Path
+
+        Path(path).write_text(self.content, encoding="utf-8")
+
+
+class _FakeBucket:
+    def __init__(self, objects):
+        self.objects = objects
+
+    def blob(self, name):
+        return _FakeBlob(self.objects[name])
+
+    def get_blob(self, name):
+        return _FakeBlob(self.objects[name]) if name in self.objects else None
+
+
+def _fake_storage(monkeypatch, objects):
+    from google.cloud import storage
+
+    client = MagicMock()
+    client.get_bucket.return_value = _FakeBucket(objects)
+    monkeypatch.setattr(storage, "Client", lambda *args, **kwargs: client)
+
+
+def test_gcs_object_is_read_as_plain_text_without_langchain_community(monkeypatch, local_doc):
+    """Regression: GCSFileLoader's default loader needs langchain-community, which is not installed."""
+    from app.core.service_status import service_status
+
+    service_status.reset()
+    _fake_storage(monkeypatch, {"comprobante.txt": "contenido del bucket con tildes: GÓMEZ"})
+    service = DocumentIngestionService(local_document_path=local_doc, use_gcs=True, gcs_bucket="b")
+
+    assert service.load_document("comprobante.txt") == "contenido del bucket con tildes: GÓMEZ"
+    assert service_status.snapshot()["gcs"]["gcp"] == 1
+    service_status.reset()
+
+
+def test_gcs_failure_falls_back_to_local_with_log_and_record(monkeypatch, local_doc, caplog):
+    import logging
+
+    from app.core.service_status import service_status
+
+    service_status.reset()
+    _fake_storage(monkeypatch, {})
+    service = DocumentIngestionService(local_document_path=local_doc, use_gcs=True, gcs_bucket="b")
+
+    with caplog.at_level(logging.WARNING, logger="app.core.document_loader"):
+        assert service.load_document("falta.txt") == "contenido local"
+
+    assert any("documento LOCAL" in r.message for r in caplog.records)
+    assert service_status.snapshot()["gcs"]["local_fallback"] == 1
+    service_status.reset()
+
+
+def test_local_ingestion_is_recorded_as_local(local_doc):
+    from app.core.service_status import service_status
+
+    service_status.reset()
+    DocumentIngestionService(local_document_path=local_doc, use_gcs=False).load_document("x.txt")
+    assert service_status.snapshot()["gcs"]["local"] == 1
+    service_status.reset()
