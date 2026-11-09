@@ -11,6 +11,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from mcp_financial_action_server.storage import financial_storage
+from pydantic import ValidationError
 
 from app.core.mcp_action_client import mcp_action_client
 from app.core.security_context import token_vault
@@ -230,3 +231,105 @@ def test_action_agent_tool_error_is_returned_to_the_model_and_loop_continues():
     assert result["status"] == "COMPLETED"  # the invalid call is not staged
     assert "pending_tool_calls" not in result
     assert "inválido" in result["execution_plan"][0]["result"]
+
+
+# --- transfer_funds_tool: form validation at staging --------------------------------------------------------------
+
+
+def _transfer_call(call_id, **args):
+    return {"name": "transfer_funds_tool", "args": {"user_id": "user_default_01", **args}, "id": call_id}
+
+
+def _transfer_state(session_id):
+    return {
+        "session_id": session_id,
+        "user_id": "user_default_01",
+        "execution_plan": [
+            {
+                "step_id": 1,
+                "title": "t",
+                "target_node": "action_agent",
+                "description": "Transferir 35000 ARS a [CBU_BANCARIO_1]",
+                "result": None,
+            }
+        ],
+    }
+
+
+def test_transfer_schema_requires_destination_and_amount():
+    """The schema sent to the model must not present the essential fields as optional."""
+    schema = transfer_funds_tool.get_input_schema().model_json_schema()
+
+    assert {"user_id", "destination_account", "amount"} <= set(schema["required"])
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {},  # only user_id: what a model with broken tool calling sends
+        {"destination_account": "[CBU_BANCARIO_1]"},  # no amount
+        {"amount": 100.0},  # no destination
+    ],
+)
+def test_transfer_tool_rejects_calls_missing_required_fields(args):
+    with pytest.raises(ValidationError):
+        transfer_funds_tool.invoke({"user_id": "user_default_01", **args})
+
+
+@pytest.mark.parametrize(
+    "args, message",
+    [
+        ({"destination_account": "", "amount": 100.0}, "destino"),
+        ({"destination_account": "   ", "amount": 100.0}, "destino"),
+        ({"destination_account": "[CBU_BANCARIO_1]", "amount": 0.0}, "mayor a 0"),
+        ({"destination_account": "[CBU_BANCARIO_1]", "amount": -50.0}, "mayor a 0"),
+        ({"destination_account": "[CBU_BANCARIO_1]", "amount": float("nan")}, "mayor a 0"),
+        ({"destination_account": "[CBU_BANCARIO_1]", "amount": float("inf")}, "mayor a 0"),
+    ],
+)
+def test_transfer_tool_rejects_empty_destination_and_non_positive_amount(args, message):
+    with pytest.raises(ValueError, match=message):
+        transfer_funds_tool.invoke({"user_id": "user_default_01", **args})
+
+
+def test_transfer_tool_still_accepts_the_destination_alias_and_numeric_strings():
+    staged = transfer_funds_tool.invoke(
+        {"user_id": "user_default_01", "destination_account": "", "destination": "CBU_BANCARIO_1", "amount": "49999"}
+    )
+
+    assert staged["destination"] == "[CBU_BANCARIO_1]" and staged["amount"] == 49999.0
+
+
+def test_action_agent_does_not_stage_a_malformed_transfer_and_stages_the_corrected_retry():
+    """The malformed call goes back to the model as a tool error; only the valid retry reaches the PEP."""
+    bad = _transfer_call("call_bad")  # only user_id
+    good = _transfer_call("call_good", destination_account="[CBU_BANCARIO_1]", amount=35000.0)
+
+    result = _run_action_agent(
+        [
+            AIMessage(content="", tool_calls=[bad]),
+            AIMessage(content="", tool_calls=[good]),
+            AIMessage(content="Transferencia solicitada."),
+        ],
+        _transfer_state("sess_validation_retry"),
+    )
+
+    assert [c["id"] for c in result["pending_tool_calls"]] == ["call_good"]
+    assert result["pending_transfer"]["amount"] == 35000.0
+    assert result["pending_transfer"]["destination"] == "[CBU_BANCARIO_1]"
+    assert result["status"] == "PENDING_PEP"
+
+
+def test_action_agent_without_a_valid_call_stages_nothing_for_the_pep():
+    """If the model never produces a well-formed transfer, no zero-amount request is sent to the PEP/PDP."""
+    result = _run_action_agent(
+        [
+            AIMessage(content="", tool_calls=[_transfer_call("call_bad_1")]),
+            AIMessage(content="", tool_calls=[_transfer_call("call_bad_2", destination_account="", amount=0.0)]),
+            AIMessage(content="No pude emitir la transferencia."),
+        ],
+        _transfer_state("sess_validation_giveup"),
+    )
+
+    assert "pending_tool_calls" not in result and "pending_transfer" not in result
+    assert result["status"] == "COMPLETED"
