@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # - "litellm": Multi-provider with dynamic fallbacks (groq -> nvidia -> vertexai -> openrouter)
     # - "groq": Ultra-fast free tier on console.groq.com (Llama 3.3 70B)
     # - "nvidia": Free tier on build.nvidia.com (NIM Llama 3.3)
-    # - "vertexai": Google Cloud Vertex AI Gemini (uses GCP Cloud Billing / credits)
+    # - "vertexai": Google Cloud Vertex AI Gemini (uses GCP Cloud Billing / credits). Vertex ONLY: no fallback providers.
     # - "openrouter": OpenRouter API
     # - "google_genai": Google AI Studio free tier via GEMINI_API_KEY
     llm_provider: Literal["litellm", "groq", "nvidia", "vertexai", "openrouter", "google_genai"] = "litellm"
@@ -54,7 +54,10 @@ class Settings(BaseSettings):
     # Google Cloud Platform configuration
     gcp_project_id: str = "demo-fintech-project"
     gcp_location: str = "us-central1"
-    vertex_model_name: str = "gemini-1.5-flash-002"
+    # Provisional default: the definitive model is confirmed by the GCP smoke test (docs/plan_gcp_integration.md).
+    vertex_model_name: str = "gemini-3.1-flash-lite"
+    # Vertex AI region for the LLM when it differs from GCP_LOCATION (some Gemini models are only served from "global").
+    vertex_location: Optional[str] = None
 
     # LangGraph Checkpointer
     # - "memory": MemorySaver (zero external dependency, ideal for local tests)
