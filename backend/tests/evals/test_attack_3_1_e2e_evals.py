@@ -19,8 +19,8 @@ from unittest.mock import patch
 
 import pytest
 
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-BACKEND_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parents[3]
+BACKEND_DIR = Path(__file__).resolve().parents[2]
 for _p in (ROOT_DIR, BACKEND_DIR):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
@@ -50,7 +50,7 @@ from tests.live_llm import requires_live_llm
 
 logger = logging.getLogger(__name__)
 
-SCENARIOS_FILE_PATH = Path(__file__).parent / "data" / "attack_3_1_scenarios.json"
+SCENARIOS_FILE_PATH = Path(__file__).resolve().parent.parent / "data" / "attack_3_1_scenarios.json"
 DATASET_NAME = os.getenv("LANGSMITH_ATTACK_DATASET", "attack-3-1-scenarios")
 REPETITIONS = int(os.getenv("ATTACK_EVAL_REPETITIONS", "3"))
 

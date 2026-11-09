@@ -22,8 +22,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-BACKEND_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parents[3]
+BACKEND_DIR = Path(__file__).resolve().parents[2]
 for _p in (ROOT_DIR, BACKEND_DIR):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
@@ -50,8 +50,8 @@ from tests.live_llm import requires_live_llm
 
 logger = logging.getLogger(__name__)
 
-GROUND_TRUTH_FILE_PATH = Path(__file__).parent / "data" / "orchestrator_ground_truth.json"
-FIXTURES_DIR = Path(__file__).parent / "fixtures" / "documents"
+GROUND_TRUTH_FILE_PATH = Path(__file__).resolve().parent.parent / "data" / "orchestrator_ground_truth.json"
+FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "documents"
 DATASET_NAME = os.getenv("LANGSMITH_ORCHESTRATOR_DATASET", "orchestrator-plan-evals")
 
 
