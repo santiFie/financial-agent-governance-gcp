@@ -11,7 +11,7 @@ services:
       - SECURITY_MODE=${SECURITY_MODE:-local_mock}
       - GCP_PROJECT_ID=${GCP_PROJECT_ID:-demo-fintech-project}
       - GCP_LOCATION=${GCP_LOCATION:-us-central1}
-      - VERTEX_MODEL_NAME=${VERTEX_MODEL_NAME:-gemini-1.5-flash-002}
+      - VERTEX_MODEL_NAME=${VERTEX_MODEL_NAME:-gemini-3.1-flash-lite}
       - CHECKPOINTER_TYPE=${CHECKPOINTER_TYPE:-memory}
       - FIRESTORE_COLLECTION=${FIRESTORE_COLLECTION:-financial_assistant_checkpoints}
       - TOKEN_VAULT_SECRET=${TOKEN_VAULT_SECRET:-development-secret-key-32-chars!}

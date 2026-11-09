@@ -177,3 +177,103 @@ def test_orchestrator_model_settings_reach_get_chat_model():
         router_node({"sanitized_input": "Consultar saldo", "is_threat": False})
 
     factory.assert_called_once_with(temperature=0.0, provider="openrouter", model="some/model:free")
+
+
+# --- Vertex-only mode (LLM_PROVIDER=vertexai) ---------------------------------------------------------------------
+
+
+def _all_external_keys():
+    return (
+        patch.object(settings, "groq_api_key", "gsk_test"),
+        patch.object(settings, "nvidia_api_key", "nvapi_test"),
+        patch.object(settings, "openrouter_api_key", "sk-or-test"),
+        patch.object(settings, "gcp_project_id", "test-proj"),
+    )
+
+
+def test_llm_provider_vertexai_builds_a_vertex_only_chain_without_fallbacks(fake_adc):
+    """LLM_PROVIDER=vertexai must ignore Groq/NVIDIA/OpenRouter keys even when they are configured."""
+    from contextlib import ExitStack
+
+    with ExitStack() as stack:
+        for p in _all_external_keys():
+            stack.enter_context(p)
+        stack.enter_context(patch.object(settings, "llm_provider", "vertexai"))
+        stack.enter_context(patch.object(settings, "vertex_model_name", "gemini-test-model"))
+        model = get_chat_model()
+
+    assert model.model_name == "vertexai"
+    assert [m["model_name"] for m in model.router.model_list] == ["vertexai"]
+    assert not model.router.fallbacks
+    assert model.router.model_list[0]["litellm_params"]["model"] == "vertex_ai/gemini-test-model"
+
+
+def test_vertexai_mode_does_not_accept_a_gemini_api_key_as_credentials():
+    from google.auth.exceptions import DefaultCredentialsError
+
+    with (
+        patch.object(settings, "llm_provider", "vertexai"),
+        patch.object(settings, "gemini_api_key", "AIza-test"),
+        patch.object(settings, "gcp_project_id", "test-proj"),
+        patch("google.auth.default", side_effect=DefaultCredentialsError("No ADC")),
+        patch.dict("os.environ", {}, clear=True),
+    ):
+        with pytest.raises(LLMConfigurationError, match="ADC"):
+            get_chat_model()
+
+
+def test_vertexai_mode_uses_vertex_location_when_set(fake_adc):
+    with (
+        patch.object(settings, "llm_provider", "vertexai"),
+        patch.object(settings, "gcp_project_id", "test-proj"),
+        patch.object(settings, "gcp_location", "us-central1"),
+        patch.object(settings, "vertex_location", "global"),
+    ):
+        model = get_chat_model()
+
+    assert model.router.model_list[0]["litellm_params"]["vertex_location"] == "global"
+
+
+def test_every_agent_resolves_vertex_only_through_the_same_factory(fake_adc):
+    """readonly/action agents call get_chat_model() with no provider; the router passes orchestrator_provider=None."""
+    from contextlib import ExitStack
+
+    with ExitStack() as stack:
+        for p in _all_external_keys():
+            stack.enter_context(p)
+        stack.enter_context(patch.object(settings, "llm_provider", "vertexai"))
+        stack.enter_context(patch.object(settings, "orchestrator_provider", None))
+        stack.enter_context(patch.object(settings, "orchestrator_model", None))
+        executor_model = get_chat_model(temperature=0.0)
+        orchestrator_model = get_chat_model(
+            temperature=0.0, provider=settings.orchestrator_provider, model=settings.orchestrator_model
+        )
+
+    for model in (executor_model, orchestrator_model):
+        assert [m["model_name"] for m in model.router.model_list] == ["vertexai"]
+
+
+def test_litellm_mode_keeps_the_multi_provider_chain(fake_adc):
+    from contextlib import ExitStack
+
+    with ExitStack() as stack:
+        for p in _all_external_keys():
+            stack.enter_context(p)
+        stack.enter_context(patch.object(settings, "llm_provider", "litellm"))
+        model = get_chat_model()
+
+    assert [m["model_name"] for m in model.router.model_list] == ["groq", "nvidia", "vertexai", "openrouter"]
+
+
+def test_llm_backend_is_recorded_in_service_status(fake_adc):
+    from app.core.service_status import service_status
+
+    service_status.reset()
+    with (
+        patch.object(settings, "llm_provider", "vertexai"),
+        patch.object(settings, "gcp_project_id", "test-proj"),
+    ):
+        get_chat_model()
+
+    assert service_status.snapshot()["llm"]["gcp"] == 1
+    service_status.reset()
