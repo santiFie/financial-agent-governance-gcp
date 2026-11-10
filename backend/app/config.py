@@ -110,6 +110,13 @@ class Settings(BaseSettings):
         default=3, description="Maximum consecutive Orchestrator tool rounds before a plan update"
     )
 
+    # Executor agents (readonly_agent / action_agent) safety limit
+    executor_max_tool_rounds: int = Field(
+        default=4,
+        ge=1,
+        description="Maximum tool rounds (model -> tools) an executor agent may run for one plan step",
+    )
+
     @model_validator(mode="after")
     def _require_own_vault_secret_in_production(self):
         if self.environment == "production" and self.token_vault_secret in WEAK_TOKEN_VAULT_SECRETS:

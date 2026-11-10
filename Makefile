@@ -130,10 +130,10 @@ smoke-gcp: require-gcp-env
 	$(PYTHON) scripts/gcp_smoke_test.py --env-file $(GCP_ENV_FILE) $(if $(PROJECT),--project $(PROJECT)) $(ARGS)
 
 attack-gcp: require-gcp-env opa-up
-	@$(GCP_ENV) exec $(PYTHON) scripts/demo_attack.py $(ARGS)
+	@$(GCP_ENV) exec $(PYTHON) scripts/demo_attack.py --require-gcp $(ARGS)
 
 attack-gcp-n: require-gcp-env opa-up
-	@$(GCP_ENV) exec $(PYTHON) scripts/demo_attack.py --runs $(N) $(ARGS)
+	@$(GCP_ENV) exec $(PYTHON) scripts/demo_attack.py --require-gcp --runs $(N) $(ARGS)
 
 destroy-gcp:
 	deploy/gcp-destroy.sh $(if $(PROJECT),--project $(PROJECT)) --env-file $(GCP_ENV_FILE) $(ARGS)

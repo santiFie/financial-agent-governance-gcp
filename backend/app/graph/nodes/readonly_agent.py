@@ -7,6 +7,7 @@ from langgraph.prebuilt import create_react_agent
 
 from app.core.llm import get_chat_model
 from app.core.prompt_manager import prompt_manager
+from app.graph.executor_limits import GraphRecursionError, bound_executor_config, limit_reached_message
 from app.graph.plan_utils import complete_active_step, get_active_step
 from app.graph.state import AgentState
 from app.graph.tools.banking_read import get_account_balances, get_recent_transactions
@@ -52,10 +53,19 @@ def readonly_agent_node(state: AgentState, config: Optional[RunnableConfig] = No
     configurable["user_id"] = user_id
     exec_config["configurable"] = configurable
 
-    result = _build_executor().invoke(
-        {"messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": task_description}]},
-        config=exec_config,
-    )
+    try:
+        result = _build_executor().invoke(
+            {"messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": task_description}]},
+            config=bound_executor_config(exec_config),
+        )
+    except GraphRecursionError:
+        step_output = limit_reached_message("readonly_agent", "No se obtuvieron datos.")
+        return {
+            "final_response": step_output,
+            "status": "COMPLETED",
+            "execution_plan": complete_active_step(state, step_output),
+            "messages": [AIMessage(content=f"[Read-Only Agent]: {step_output}")],
+        }
 
     # El último mensaje devuelto por el sub-agente es la síntesis final
     last_message = result["messages"][-1]
