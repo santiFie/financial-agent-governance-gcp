@@ -55,4 +55,21 @@ class ServiceStatus:
             return any(counts.get(LOCAL_FALLBACK, 0) for counts in self._counts.values())
 
 
+def snapshot_delta(
+    before: Dict[str, Dict[str, object]], after: Dict[str, Dict[str, object]]
+) -> Dict[str, Dict[str, object]]:
+    """What happened between two snapshots: per service, how many calls each backend served."""
+    delta: Dict[str, Dict[str, object]] = {}
+    for service, now in after.items():
+        prev = before.get(service, {})
+        counts = {b: int(now.get(b, 0)) - int(prev.get(b, 0)) for b in BACKENDS}
+        if not any(counts.values()):
+            continue
+        delta[service] = {
+            **counts,
+            "last_fallback_reason": now.get("last_fallback_reason") if counts[LOCAL_FALLBACK] else None,
+        }
+    return delta
+
+
 service_status = ServiceStatus()

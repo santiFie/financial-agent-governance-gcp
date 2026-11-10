@@ -32,10 +32,10 @@ def test_attack_gcp_requires_the_env_file_before_touching_docker():
 def test_attack_targets_load_the_env_file_and_run_the_demo():
     plan = _make("-n", "attack-gcp", "N=3").stdout
     assert 'set -a; . "' in plan and ".env.gcp" in plan
-    assert "scripts/demo_attack.py" in plan and "--runs" not in plan
+    assert "scripts/demo_attack.py --require-gcp" in plan and "--runs" not in plan
 
     many = _make("-n", "attack-gcp-n", "N=3").stdout
-    assert "scripts/demo_attack.py --runs 3" in many
+    assert "scripts/demo_attack.py --require-gcp --runs 3" in many
 
     assert "USE_GCS_INGESTION=false" in _make("-n", "attack-gcp", "GCS=false").stdout
     assert "USE_GCS_INGESTION" not in plan

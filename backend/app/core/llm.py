@@ -189,6 +189,32 @@ def get_available_deployments(
     return deployments
 
 
+def effective_provider(provider: Optional[str] = None) -> Optional[str]:
+    """
+    Provider that get_chat_model() will put first. `None` means the multi-provider LiteLLM chain.
+    LLM_PROVIDER=vertexai applies to every caller that does not name a provider.
+    """
+    if provider:
+        return provider.lower()
+    return "vertexai" if (settings.llm_provider or "").lower() == "vertexai" else None
+
+
+def describe_llm(provider: Optional[str] = None, model: Optional[str] = None) -> str:
+    """Human-readable ID of the model a call to get_chat_model(provider, model) uses (for logs and run evidence)."""
+    chosen = effective_provider(provider)
+    if chosen == "vertexai":
+        location = settings.vertex_location or settings.gcp_location
+        return f"vertexai/{model or settings.vertex_model_name}@{location}"
+    if chosen:
+        default_model = getattr(settings, f"{chosen}_model", None)
+        return f"{chosen}/{model or default_model or 'default'}"
+    try:
+        chain = [d["litellm_params"]["model"] for d in get_available_deployments()]
+    except Exception:
+        chain = []
+    return "litellm(" + " -> ".join(chain) + ")" if chain else "litellm(sin credenciales)"
+
+
 def get_chat_model(
     temperature: float = 0.0,
     provider: Optional[str] = None,
