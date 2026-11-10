@@ -11,7 +11,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from app.config import Settings, settings
 from app.graph.nodes.action_agent import action_agent_node
 from app.graph.nodes.readonly_agent import readonly_agent_node
-from tests.test_action_multitool import ScriptedChatModel
+from tests.unit.test_action_multitool import ScriptedChatModel
 
 USER = "user_default_01"
 

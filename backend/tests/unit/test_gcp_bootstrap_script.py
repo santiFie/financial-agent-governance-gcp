@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent.parent
+ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "deploy" / "gcp-bootstrap.sh"
 
 # Fake gcloud: logs its arguments; `describe` succeeds only for resources listed in $STUB_EXISTING.

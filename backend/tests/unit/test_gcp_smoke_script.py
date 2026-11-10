@@ -13,7 +13,7 @@ from app.core.service_status import GCP, LOCAL_FALLBACK, service_status
 from app.models.api_schemas import DetectedPII
 from tests.fakes_firestore import FakeFirestoreClient
 
-SCRIPT = Path(__file__).resolve().parent.parent.parent / "scripts" / "gcp_smoke_test.py"
+SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "gcp_smoke_test.py"
 
 
 @pytest.fixture(scope="module")
