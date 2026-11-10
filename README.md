@@ -61,11 +61,14 @@ Desarrollo sin Docker: `cd backend && python3 -m venv .venv && .venv/bin/pip ins
 
 ## Ejecutar el ataque y leer la salida
 
-Requiere una clave de LLM en `backend/.env` (o en el entorno) y Docker para levantar OPA:
+Requiere Docker para levantar OPA y una clave de LLM en `backend/.env`. Ese archivo se crea a partir de la plantilla única del repo (ya trae el modelo del Orquestador; completá `OPENROUTER_API_KEY`, o la clave del proveedor que uses):
 
 ```bash
+cp .env.example backend/.env
 make attack
 ```
+
+`make attack` lee `backend/.env`; el stack de Docker (`make up-dev`) lee `.env.development`. Son archivos distintos, así que la clave se completa en el que corresponda a lo que vayas a ejecutar.
 
 El script narra el grafo nodo por nodo, en orden cronológico: la sanitización, el plan inicial, la lectura del documento, el replan, las llamadas en staging, la entrada y la respuesta de OPA, y el estado final (saldos antes y después, destinatarios nuevos, transferencias ejecutadas). Termina con el camino de ejecución:
 
