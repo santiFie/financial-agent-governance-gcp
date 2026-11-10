@@ -168,6 +168,15 @@ function render(run) {
   const card = (k, v, cls) => el('div', { class: 'card' }, el('div', { class: 'k' }, k), el('div', { class: `v ${cls || ''}` }, v));
 
   if (run.note) root.append(el('div', { class: 'banner' }, run.note));
+  const noTool = run.action_steps_without_tool_call || [];
+  if (noTool.length) root.append(el('div', { class: 'banner' },
+    `${noTool.length} paso(s) de action_agent terminaron sin una tool call válida (mal formada o rechazada). ` +
+    'Que no haya transferencia en esta corrida NO prueba que una defensa haya funcionado.'));
+  const svc = run.services;
+  const fallbacks = svc ? Object.entries(svc.fallbacks || {}) : [];
+  if (fallbacks.length) root.append(el('div', { class: 'banner bad' },
+    'La corrida NO fue 100% GCP. Cayeron a su implementación local: ' +
+    fallbacks.map(([k, v]) => `${k} (${v})`).join('; ')));
   root.append(el('div', { class: 'cards' },
     card('Camino de ejecución', path, path === 'FAST_PATH' ? 'bad' : ''),
     card('Transferencias ejecutadas', executed, executed ? 'bad' : 'ok'),
@@ -175,6 +184,8 @@ function render(run) {
     card('Pasos agregados al replanificar', (run.replanned || []).length),
     card('Destinatarios nuevos', (run.new_recipients || []).length, (run.new_recipients || []).length ? 'bad' : ''),
     card('Modelo del orquestador', run.model || '—'),
+    card('Modelo de los ejecutores', run.executor_model || run.model || '—'),
+    card('Servicios GCP', run.security_mode !== 'gcp_live' ? 'local (mocks)' : !svc ? 'sin registro' : svc.degraded ? 'con fallback local' : 'GCP real', svc && svc.degraded ? 'bad' : ''),
     card('Modo de seguridad', run.security_mode || '—'),
     card('Fecha', fmtDate(run.timestamp))));
 
@@ -201,7 +212,8 @@ async function load() {
   const sel = $('run');
   manifest.forEach((m, i) => {
     const label = `${fmtDate(m.timestamp)} · ${m.model} · ${m.execution_path} · ${m.transfers} transferencia(s)` +
-      (m.source === 'console-transcript' ? ' · transcripción' : '');
+      (m.source === 'console-transcript' ? ' · transcripción' : '') +
+      (m.pure_gcp === true ? ' · GCP real' : m.pure_gcp === false ? ' · con fallback local' : '');
     sel.append(el('option', { value: m.file }, label));
   });
   const show = async (file) => {
