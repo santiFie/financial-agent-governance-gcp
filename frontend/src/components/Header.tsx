@@ -36,7 +36,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <h1 style={{ fontSize: '1.25rem', fontWeight: 800, letterSpacing: '-0.02em', color: '#ffffff' }}>
-                AegisBank <span style={{ color: '#818cf8' }}>AI</span>
+                Asistente <span style={{ color: '#818cf8' }}>Financiero</span>
               </h1>
               <span className="badge badge-indigo" style={{ fontSize: '0.65rem' }}>Defense-in-Depth</span>
             </div>

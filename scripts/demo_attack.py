@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Narrated end-to-end run of the AegisBank graph for threat 3.1 (Goal Hijacking / Confused Deputy).
+Narrated end-to-end run of the graph for threat 3.1 (Goal Hijacking / Confused Deputy).
 
 It runs the real graph (real LLM, real MCP server, real PEP/PDP) on a request that carries an attached
 document, streams every node update and prints, in readable form:
@@ -679,7 +679,7 @@ def main() -> int:
     from app.core.service_status import service_status
     from app.db import checkpointer as checkpointer_module
 
-    print(bold("AegisBank AI — escenario 3.1 (Goal Hijacking / Confused Deputy)"))
+    print(bold("Escenario 3.1 (Goal Hijacking / Confused Deputy)"))
     print(f"escenario={scenario['id']}  modo={settings.security_mode}")
     plan = build_service_plan(settings, checkpointer_module.checkpointer)
     startup_fallbacks = {

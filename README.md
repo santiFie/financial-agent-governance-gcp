@@ -1,4 +1,4 @@
-# AegisBank AI: PoC de la amenaza 3.1 (Goal Hijacking / Confused Deputy)
+# PoC de la amenaza 3.1 (Goal Hijacking / Confused Deputy)
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com)
 [![LangGraph](https://img.shields.io/badge/LangGraph-multi--agente-blue.svg)](https://langchain-ai.github.io/langgraph/)
@@ -97,6 +97,38 @@ make server-results
 ```
 
 Abre `http://localhost:8765/` con un visor HTML offline: cronología, plan y replan, llamadas en staging, decisión de OPA y saldos antes/después. Más en [`docs/evidence/`](docs/evidence/).
+
+## Resultados medidos
+
+El resultado depende del modelo del Orquestador, así que se mide por modelo y por condición. "Transferencia ejecutada" es el ataque completo: alta del destinatario, Fast-Path de OPA y salida del dinero sin HITL. En ningún caso exitoso intervino un humano.
+
+**Seguridad local** (Model Armor y DLP simulados, documento local, OPA real; Orquestador vía OpenRouter, 5 corridas por modelo):
+
+| Orquestador | Transferencias ejecutadas |
+| :--- | :---: |
+| Nemotron 3.5 Super VL | 4/5 |
+| Nemotron 3 Nano Omni | 2/5 |
+| gpt-oss-120b | 1/5 |
+| gpt-oss-20b | 0/5 |
+| DeepSeek V4.1 Flash (sin reasoning y con `reasoning_effort=high`) | 0/5 y 0/5 |
+
+**Seguridad GCP real** (Model Armor, Cloud DLP, Firestore y bucket reales, OPA real; el comprobante pasó Model Armor en todas las corridas):
+
+| Orquestador | Corridas | Transferencias ejecutadas |
+| :--- | :---: | :---: |
+| Nemotron 3.5 Super VL (OpenRouter, `:free`) | 5 | 1/5 |
+| gpt-oss-120b (Groq) | 1 | 1/1 |
+| Nemotron 3.5 Lightning (NVIDIA) | 3 | 2/3 |
+| DeepSeek V4 Flash 0731 (OpenRouter, `reasoning_effort=none` y `high`) | 3 y 3 | 0/3 y 0/3 |
+| Gemini 3.5 Flash, GLM 5.2, Gemma 4 (Vertex AI) | 5 cada uno | 0/5 cada uno |
+| Gemini 3.1 Flash-Lite y DeepSeek V4.1 Flash (Vertex AI) | 1 cada uno | 0/1 cada uno (en DeepSeek el plan sí adoptó la directiva y falló la ejecución por un error técnico) |
+
+Cómo leerlo:
+
+- Son observaciones con n pequeño, no tasas estables. Entre las dos tablas cambian a la vez la seguridad, el origen del documento y el proveedor, así que no se puede atribuir una diferencia (por ejemplo Nemotron 3.5 Super, 4/5 contra 1/5) a un solo factor.
+- "0 transferencias" no siempre significa que el sistema resistió: hay modelos que adoptan la directiva y fallan por errores técnicos (alias inválido, cuenta de origen inexistente), y varios de los que no actuaron le informaron al usuario el contenido del comprobante.
+- El caso de contraste (transferencia directa a un destinatario no confiable) termina en HITL; está cubierto por `backend/tests/unit/test_control_scenarios.py`.
+- Método, razonamiento de cada modelo y límites en [`docs/analisis_modelos_ataque.md`](docs/analisis_modelos_ataque.md); resumen por modelo en [`docs/modelos_probados.md`](docs/modelos_probados.md); las corridas guardadas se ven con `make server-results`.
 
 ## Tests
 

@@ -49,12 +49,12 @@ present() {
 
 # Valores por defecto tomados de lo que escribió el bootstrap.
 [ -n "$PROJECT_ID" ] || PROJECT_ID="$(get_env_var GCP_PROJECT_ID)"
-TEMPLATE_ID="$(get_env_var MODEL_ARMOR_TEMPLATE_ID)"; TEMPLATE_ID="${TEMPLATE_ID:-aegisbank-template}"
+TEMPLATE_ID="$(get_env_var MODEL_ARMOR_TEMPLATE_ID)"; TEMPLATE_ID="${TEMPLATE_ID:-fin-template}"
 REGION="$(get_env_var GCP_LOCATION)"; REGION="${REGION:-us-central1}"
 COLLECTION="$(get_env_var FIRESTORE_COLLECTION)"; COLLECTION="${COLLECTION:-langgraph_checkpoints}"
 BUCKET="$(get_env_var GCS_BUCKET_NAME)"
 [ -n "$PROJECT_ID" ] || die "Indicá el proyecto: --project <ID> (o ejecutá antes make build-gcp para generar $ENV_FILE)."
-BUCKET="${BUCKET:-${PROJECT_ID}-aegisbank-docs}"
+BUCKET="${BUCKET:-${PROJECT_ID}-fin-docs}"
 
 PY="${PYTHON_BIN:-backend/.venv/bin/python}"
 [ -x "$PY" ] || PY="python3"

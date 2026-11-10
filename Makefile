@@ -1,5 +1,5 @@
 # ==============================================================================
-# Makefile - AegisBank AI (Sistema Multi-Agente Bancario Defense-in-Depth)
+# Makefile - PoC de asistente financiero multi-agente (Defense-in-Depth)
 # ==============================================================================
 
 .DEFAULT_GOAL := help

@@ -1,6 +1,6 @@
 # Despliegue en Google Cloud Platform (GCP) y Guía de Aprendizaje IAM
 
-Esta guía explica cómo desplegar **AegisBank AI** en GCP maximizando la preservación del crédito inicial de $300 USD y detalla el ejercicio práctico de configuración de **IAM bajo el Principio de Menor Privilegio (Least Privilege)**. Para consultar las decisiones sobre Firestore, Artifact Registry, cuentas de servicio de CI/CD (`sa-cloud-build`) y resolución de incidencias en Cloud Build, consulta [`docs/gcp_build_and_service_accounts_decisions.md`](gcp_build_and_service_accounts_decisions.md).
+Esta guía explica cómo desplegar este sistema (PoC) en GCP maximizando la preservación del crédito inicial de $300 USD y detalla el ejercicio práctico de configuración de **IAM bajo el Principio de Menor Privilegio (Least Privilege)**. Para consultar las decisiones sobre Firestore, Artifact Registry, cuentas de servicio de CI/CD (`sa-cloud-build`) y resolución de incidencias en Cloud Build, consulta [`docs/gcp_build_and_service_accounts_decisions.md`](gcp_build_and_service_accounts_decisions.md).
 
 ---
 
@@ -120,7 +120,7 @@ gcloud run deploy financial-assistant-backend \
   --cpu 1 \
   --no-allow-unauthenticated \
   --set-secrets TOKEN_VAULT_SECRET=token-vault-secret:latest \
-  --set-env-vars ENVIRONMENT=production,SECURITY_MODE=gcp_live,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=us-central1,LLM_PROVIDER=vertexai,VERTEX_MODEL_NAME=$VERTEX_MODEL,USE_GCP_MODEL_ARMOR=true,MODEL_ARMOR_TEMPLATE_ID=aegisbank-template,PDP_URL=$PDP_URL,PDP_FALLBACK_MODE=deny
+  --set-env-vars ENVIRONMENT=production,SECURITY_MODE=gcp_live,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=us-central1,LLM_PROVIDER=vertexai,VERTEX_MODEL_NAME=$VERTEX_MODEL,USE_GCP_MODEL_ARMOR=true,MODEL_ARMOR_TEMPLATE_ID=fin-template,PDP_URL=$PDP_URL,PDP_FALLBACK_MODE=deny
 ```
 
 Puntos que el comando anterior corrige respecto de la versión previa de esta guía (sin ellos el servicio no arranca o no puede ejecutar transferencias):
@@ -143,7 +143,7 @@ Por defecto el guardrail es `LocalModelArmorGuard` (regex léxicas, `backend/app
 1. Habilitar la API y crear una plantilla en la misma región que `GCP_LOCATION` (los nombres de flags pueden variar con la versión de `gcloud`; revisá `gcloud model-armor templates create --help`):
    ```bash
    gcloud services enable modelarmor.googleapis.com
-   gcloud model-armor templates create aegisbank-template --location=$REGION \
+   gcloud model-armor templates create fin-template --location=$REGION \
      --pi-and-jailbreak-filter-settings-enforcement=enabled \
      --pi-and-jailbreak-filter-settings-confidence-level=medium-and-above
    ```
@@ -153,7 +153,7 @@ Por defecto el guardrail es `LocalModelArmorGuard` (regex léxicas, `backend/app
      --member="serviceAccount:$SA_EMAIL" --role="roles/modelarmor.user"
    ```
    (`deploy/iam-setup.sh` ya lo hace en el paso 4b.)
-3. Configurar `SECURITY_MODE=gcp_live`, `USE_GCP_MODEL_ARMOR=true`, `MODEL_ARMOR_TEMPLATE_ID=aegisbank-template`, `GCP_PROJECT_ID` y `GCP_LOCATION` (ver `.env.production.example`; con `make up-prod`).
+3. Configurar `SECURITY_MODE=gcp_live`, `USE_GCP_MODEL_ARMOR=true`, `MODEL_ARMOR_TEMPLATE_ID=fin-template`, `GCP_PROJECT_ID` y `GCP_LOCATION` (ver `.env.production.example`; con `make up-prod`).
 4. Para leer el comprobante desde un bucket: `USE_GCS_INGESTION=true`, `GCS_BUCKET_NAME=<bucket>` y el rol `roles/storage.objectViewer` sobre ese bucket. Si el objeto no existe se usa `backend/local_storage/comprobante.txt`.
 
 **Comportamiento a tener en cuenta**
@@ -174,7 +174,7 @@ Ejecuta el ataque 3.1 en local contra servicios reales de GCP (sin desplegar Clo
 
 | Comando | Qué hace |
 | :--- | :--- |
-| `make build-gcp PROJECT=<id>` | Idempotente. Habilita las APIs (DLP, Vertex AI, Firestore, Model Armor, Storage), crea la base Firestore, la plantilla de Model Armor `aegisbank-template` y un bucket con el comprobante, y escribe `.env.gcp` (ignorado por git, con un `TOKEN_VAULT_SECRET` propio). Termina con los smoke tests. Opciones por `ARGS`: `--dry-run`, `--yes`, `--region`, `--no-gcs`, `--skip-smoke`, `--with-sa`. |
+| `make build-gcp PROJECT=<id>` | Idempotente. Habilita las APIs (DLP, Vertex AI, Firestore, Model Armor, Storage), crea la base Firestore, la plantilla de Model Armor `fin-template` y un bucket con el comprobante, y escribe `.env.gcp` (ignorado por git, con un `TOKEN_VAULT_SECRET` propio). Termina con los smoke tests. Opciones por `ARGS`: `--dry-run`, `--yes`, `--region`, `--no-gcs`, `--skip-smoke`, `--with-sa`. |
 | `make smoke-gcp` | Prueba DLP, Model Armor, Vertex AI, Firestore y GCS reales antes de gastar una corrida. |
 | `make attack-gcp` | Escenario 3.1 con `.env.gcp` cargado. `GCS=false` lee el comprobante de `backend/local_storage/`. Usa `--require-gcp`: se niega a correr (código de salida 3) si algún servicio, **incluido el LLM**, no es GCP real, y termina con código 3 si una corrida usó un fallback local (no es una medición 100% GCP). |
 | `make attack-gcp-n N=5` | Lo mismo `N` veces, con tasas. |

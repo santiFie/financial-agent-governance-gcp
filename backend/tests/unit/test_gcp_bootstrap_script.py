@@ -74,7 +74,7 @@ def test_dry_run_prints_the_plan_without_calling_gcloud_or_writing_files(sandbox
 
     assert result.returncode == 0, result.stderr
     assert "[dry-run] gcloud firestore databases create" in result.stdout
-    assert "[dry-run] gcloud model-armor templates create aegisbank-template" in result.stdout
+    assert "[dry-run] gcloud model-armor templates create fin-template" in result.stdout
     assert sandbox.calls() == [] and not sandbox.env_file.exists()
 
 
@@ -86,18 +86,18 @@ def test_fresh_project_creates_every_resource_and_writes_env_file(sandbox):
     for expected in (
         "services enable dlp.googleapis.com aiplatform.googleapis.com firestore.googleapis.com modelarmor.googleapis.com storage.googleapis.com --project=demo-proj",
         "firestore databases create --database=(default) --location=us-central1 --type=firestore-native",
-        "model-armor templates create aegisbank-template --location=us-central1 --project=demo-proj",
+        "model-armor templates create fin-template --location=us-central1 --project=demo-proj",
         "--pi-and-jailbreak-filter-settings-enforcement=enabled",
-        "storage buckets create gs://demo-proj-aegisbank-docs",
-        "storage cp backend/local_storage/comprobante.txt gs://demo-proj-aegisbank-docs/comprobante.txt",
+        "storage buckets create gs://demo-proj-fin-docs",
+        "storage cp backend/local_storage/comprobante.txt gs://demo-proj-fin-docs/comprobante.txt",
     ):
         assert expected in calls, expected
 
     env = dict(line.split("=", 1) for line in sandbox.env_file.read_text().splitlines() if "=" in line)
     assert env["GCP_PROJECT_ID"] == "demo-proj" and env["SECURITY_MODE"] == "gcp_live"
     assert env["LLM_PROVIDER"] == "vertexai" and env["CHECKPOINTER_TYPE"] == "firestore"
-    assert env["USE_GCP_MODEL_ARMOR"] == "true" and env["MODEL_ARMOR_TEMPLATE_ID"] == "aegisbank-template"
-    assert env["USE_GCS_INGESTION"] == "true" and env["GCS_BUCKET_NAME"] == "demo-proj-aegisbank-docs"
+    assert env["USE_GCP_MODEL_ARMOR"] == "true" and env["MODEL_ARMOR_TEMPLATE_ID"] == "fin-template"
+    assert env["USE_GCS_INGESTION"] == "true" and env["GCS_BUCKET_NAME"] == "demo-proj-fin-docs"
     assert len(env["TOKEN_VAULT_SECRET"]) == 64
     assert oct(sandbox.env_file.stat().st_mode & 0o777) == "0o600"
 
@@ -109,7 +109,7 @@ def test_second_run_is_idempotent_and_keeps_secret_and_user_edits(sandbox):
     sandbox.env_file.write_text(first.replace("VERTEX_LOCATION=global", "VERTEX_LOCATION=us-central1"))
     sandbox.log.write_text("")
 
-    result = sandbox.run("--project", "demo-proj", existing="(default) aegisbank-template demo-proj-aegisbank-docs")
+    result = sandbox.run("--project", "demo-proj", existing="(default) fin-template demo-proj-fin-docs")
 
     assert result.returncode == 0, result.stdout + result.stderr
     calls = "\n".join(sandbox.calls())

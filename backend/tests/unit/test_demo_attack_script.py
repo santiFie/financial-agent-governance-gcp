@@ -88,7 +88,7 @@ def _settings(**overrides):
     base = dict(
         security_mode="gcp_live",
         use_gcp_model_armor=True,
-        model_armor_template_id="aegisbank-template",
+        model_armor_template_id="fin-template",
         gcp_location="us-central1",
         vertex_location="global",
         vertex_model_name="gemini-3.1-flash-lite",
@@ -98,7 +98,7 @@ def _settings(**overrides):
         checkpointer_type="firestore",
         firestore_collection="langgraph_checkpoints",
         use_gcs_ingestion=True,
-        gcs_bucket_name="proj-aegisbank-docs",
+        gcs_bucket_name="proj-fin-docs",
     )
     return SimpleNamespace(**{**base, **overrides})
 

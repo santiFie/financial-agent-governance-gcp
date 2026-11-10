@@ -116,7 +116,7 @@ def bootstrap_environment(project: Optional[str], env_file: Optional[str]) -> Op
     os.environ["LLM_PROVIDER"] = "vertexai"
     os.environ["CHECKPOINTER_TYPE"] = "firestore"
     os.environ["USE_GCP_MODEL_ARMOR"] = "true"
-    os.environ.setdefault("MODEL_ARMOR_TEMPLATE_ID", "aegisbank-template")
+    os.environ.setdefault("MODEL_ARMOR_TEMPLATE_ID", "fin-template")
     os.environ.setdefault("GCP_LOCATION", "us-central1")
     os.chdir(BACKEND_DIR)  # relative settings (local_storage) resolve like in the backend
     return resolved
@@ -515,7 +515,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     project = bootstrap_environment(args.project, args.env_file)
-    print(f"AegisBank AI — smoke tests GCP  (proyecto: {project or 'SIN DEFINIR'})")
+    print(f"Smoke tests GCP  (proyecto: {project or 'SIN DEFINIR'})")
 
     registry = dict(CHECKS)
     if args.models:
