@@ -82,12 +82,16 @@ Hay cuatro archivos de entorno distintos, cada uno para un comando. Cada comando
 
 ## Ejecutar el ataque y leer la salida
 
-Requiere Docker para levantar OPA y **una API key de al menos uno de estos proveedores de LLM: Groq (`GROQ_API_KEY`), NVIDIA (`NVIDIA_API_KEY`) u OpenRouter (`OPENROUTER_API_KEY`)**. Sin ninguna clave el script termina con `ERROR` de configuración. La clave va en un `.env`, que se crea a partir de la plantilla única del repo (ya trae el modelo del Orquestador):
+Requiere Docker (para levantar OPA), Python 3 con `venv` y **una API key de al menos uno de estos proveedores de LLM: Groq (`GROQ_API_KEY`), NVIDIA (`NVIDIA_API_KEY`) u OpenRouter (`OPENROUTER_API_KEY`)**. Sin ninguna clave el script termina con `ERROR` de configuración. La clave va en un `.env`, que se crea a partir de la plantilla única del repo (ya trae el modelo del Orquestador):
 
 ```bash
-cp .env.example backend/.env
+python3 -m venv backend/.venv
+backend/.venv/bin/pip install -r backend/requirements.txt   # una sola vez
+cp .env.example backend/.env                                # y completar la API key
 make attack
 ```
+
+`make attack` corre el script con `backend/.venv/bin/python` si existe y con `python3` del sistema si no; en un clon nuevo sin las dependencias instaladas falla, por eso el venv va primero. Solo OPA corre en Docker; el grafo de agentes corre en tu máquina.
 
 El `.env` puede estar en `backend/.env` o en la raíz del repo: la configuración lo busca subiendo desde `backend/app/`, así que ambos sitios funcionan (si existen los dos, gana el de `backend/`). `make attack` lo lee de ahí; el stack de Docker (`make up-dev`) lee `.env.development`. Son archivos distintos, así que la clave se completa en el que corresponda a lo que vayas a ejecutar.
 
@@ -108,6 +112,31 @@ make attack-control        # contraste: transferencia directa a un destinatario 
 ```
 
 Cada corrida se guarda en `docs/evidence/runs/` (JSON completo, sin truncar).
+
+## Probar en un entorno limpio y descartable (VM)
+
+Para reproducir todo desde cero (clonar, instalar, levantar y atacar) conviene una máquina descartable. Una VM funciona bien porque trae su propio daemon de Docker; un contenedor común no, ya que `make attack` necesita ejecutar `docker compose` para levantar OPA. Ejemplo con [Multipass](https://multipass.run/) y Ubuntu 24.04 (cualquier VM Linux con Docker sirve):
+
+```bash
+multipass launch 24.04 --name poc-test --cpus 2 --memory 4G --disk 20G
+multipass shell poc-test
+```
+
+Dentro de la VM:
+
+```bash
+sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2 make git python3-venv python3-pip
+sudo usermod -aG docker $USER && newgrp docker
+git clone https://github.com/santiFie/financial-agent-governance-gcp.git
+cd financial-agent-governance-gcp && git checkout develop
+python3 -m venv backend/.venv && backend/.venv/bin/pip install -r backend/requirements.txt
+cp .env.example backend/.env      # completar GROQ_API_KEY, NVIDIA_API_KEY u OPENROUTER_API_KEY
+make attack
+```
+
+Para el stack completo con interfaz (sin el venv): completá una clave en `.env.development` y ejecutá `make up-dev`. Para el modo GCP real hace falta además `gcloud` y `gcloud auth application-default login` dentro de la VM (ver [`docs/gcp_deployment_and_iam.md`](docs/gcp_deployment_and_iam.md)). Al terminar, `multipass delete poc-test --purge` elimina la VM.
+
+Nota: el `Dockerfile` del backend usa Python 3.11 y Ubuntu 24.04 trae 3.12. Si la instalación de dependencias falla con esa versión, instalá Python 3.11 y creá el venv con él.
 
 ## Evidencia sin LLM
 
