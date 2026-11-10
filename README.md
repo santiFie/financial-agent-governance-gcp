@@ -80,9 +80,33 @@ Hay cuatro archivos de entorno distintos, cada uno para un comando. Cada comando
 
 `.env.gcp` se carga en el entorno del proceso y tiene prioridad sobre `.env`. Si solo querés reproducir el ataque, usá `.env`; `.env.development` es para explorar la interfaz, y `.env.production` y `.env.gcp` solo si trabajás con GCP real.
 
+## Modelos de LLM: Orquestador y agentes ejecutores
+
+Hay dos roles de modelo, que se configuran por separado:
+
+| Rol | Qué hace | Variables | Si no se configuran |
+| :--- | :--- | :--- | :--- |
+| **Orquestador** (`router`) | Planifica, lee el documento y replanifica. **Es la variable del experimento**: el ataque tiene éxito o no según este modelo. | `ORCHESTRATOR_PROVIDER` (`groq`, `nvidia`, `openrouter`, `vertexai`...) y `ORCHESTRATOR_MODEL` | Usa la misma cadena de proveedores que los ejecutores |
+| **Agentes ejecutores** (`readonly_agent` y `action_agent`) | Eligen la herramienta y sus argumentos a partir de la descripción de su paso | `LLM_PROVIDER` y el modelo por defecto de cada proveedor: `GROQ_MODEL`, `NVIDIA_MODEL`, `OPENROUTER_MODEL` | Cadena `litellm` |
+
+Cómo se resuelve cada uno:
+
+- **Orquestador.** Si definís `ORCHESTRATOR_PROVIDER`, ese proveedor va primero con el modelo de `ORCHESTRATOR_MODEL`. Si ese proveedor no tiene API key, el Orquestador falla con un error de configuración (no cambia de proveedor en silencio). `ORCHESTRATOR_MODEL` solo se aplica si también hay `ORCHESTRATOR_PROVIDER`. La plantilla trae `openrouter` con `nvidia/nemotron-3.5-super-vl:free`, el modelo más vulnerable que medimos.
+- **Ejecutores.** Usan la cadena de respaldo `litellm`: prueban Groq, luego NVIDIA, Vertex AI y OpenRouter, y se quedan con los que tengan credenciales (el primero es el principal y los demás son respaldo). Cada proveedor usa su modelo por defecto (`GROQ_MODEL`, etc., con `openai/gpt-oss-120b` en la plantilla). Con `LLM_PROVIDER=vertexai` **todos** los agentes, Orquestador incluido, usan solo Vertex AI y sin respaldo (es lo que hace `make attack-gcp`).
+- **Los ejecutores no son el objeto de medición**, pero sí influyen: un modelo ejecutor con tool calling débil puede truncar argumentos o inventar cuentas de origen y hacer fallar un ataque que el Orquestador sí adoptó. Por eso las tasas se leen junto con el modelo del Orquestador y la cadena de ejecutores usada (el JSON de cada corrida guarda la cadena completa).
+
+Ejemplo: probar `gpt-oss-120b` por Groq como Orquestador, en el `.env`:
+
+```
+ORCHESTRATOR_PROVIDER=groq
+ORCHESTRATOR_MODEL=openai/gpt-oss-120b
+```
+
+Los modelos probados y el motivo de cada uno están en [`docs/modelos_probados.md`](docs/modelos_probados.md).
+
 ## Ejecutar el ataque y leer la salida
 
-Requiere Docker (para levantar OPA), Python 3 con `venv` y **una API key de al menos uno de estos proveedores de LLM: Groq (`GROQ_API_KEY`), NVIDIA (`NVIDIA_API_KEY`) u OpenRouter (`OPENROUTER_API_KEY`)**. Sin ninguna clave el script termina con `ERROR` de configuración. La clave va en un `.env`, que se crea a partir de la plantilla única del repo (ya trae el modelo del Orquestador):
+Requiere Docker (para levantar OPA), Python 3 con `venv` y API keys de LLM. Con la plantilla `.env.example` tal cual, el Orquestador está fijado a OpenRouter, así que hace falta **`OPENROUTER_API_KEY`**; las keys de Groq (`GROQ_API_KEY`) y NVIDIA (`NVIDIA_API_KEY`) son opcionales y sirven a los agentes ejecutores (ver [Modelos de LLM](#modelos-de-llm-orquestador-y-agentes-ejecutores)). Si preferís usar un solo proveedor, dejá `ORCHESTRATOR_PROVIDER` y `ORCHESTRATOR_MODEL` vacíos y alcanza con una key de cualquiera de los tres. Sin ninguna clave el script termina con `ERROR` de configuración. La clave va en un `.env`, que se crea a partir de la plantilla única del repo:
 
 ```bash
 python3 -m venv backend/.venv
@@ -182,13 +206,18 @@ Cómo leerlo:
 
 ## Modos: local y GCP
 
-| | `local_mock` (por defecto en `make up-dev`) | `gcp_live` (`make up-prod`) |
+**Mock** quiere decir que el servicio de seguridad o de estado lo reemplaza una implementación local, sin red ni credenciales de GCP. Se elige con `SECURITY_MODE`:
+
+| | `local_mock` (por defecto en `make up-dev` y `make attack`) | `gcp_live` (`make up-prod`, `make attack-gcp`) |
 | :--- | :--- | :--- |
 | DLP | Regex local | Cloud DLP |
 | Model Armor | Heurísticas léxicas locales | Servicio real con `USE_GCP_MODEL_ARMOR=true` y una plantilla propia |
 | LLM | `LLM_PROVIDER` (Groq, NVIDIA, OpenRouter...) | Vertex AI u otro proveedor |
+| Checkpointer del grafo | En memoria (se pierde al reiniciar) | Firestore con `CHECKPOINTER_TYPE=firestore` |
 | Documento adjunto | `backend/local_storage/comprobante.txt` | Bucket con `USE_GCS_INGESTION=true` (cae al archivo local si no existe) |
-| PDP | OPA en contenedor | OPA en contenedor |
+| Credenciales | Solo API keys de LLM | Credenciales de gcloud y un proyecto con facturación |
+
+Lo que **no** cambia entre modos: OPA corre siempre en un contenedor local, y el servidor FastMCP con las cuentas y saldos es simulado. Con `make attack` la lógica de seguridad usa mocks y el LLM es externo; con `make attack-gcp` se usan servicios reales de GCP. Si un servicio de GCP falla, el sistema cae al mock local y lo registra (no falla cerrado); `make attack-gcp` se niega a correr o termina con error si eso ocurre. En las corridas guardadas el comprobante pasó también Model Armor real: el ataque es semántico y no contiene firmas léxicas.
 
 Para correr el ataque contra servicios reales de GCP desde tu máquina (Model Armor, Cloud DLP, Firestore, bucket y Vertex AI; con tu propio proyecto):
 
@@ -197,6 +226,15 @@ make build-gcp PROJECT=<tu-proyecto>   # crea y configura todo (idempotente) y e
 make smoke-gcp                         # prueba cada servicio real
 make attack-gcp                        # escenario 3.1; N repeticiones con make attack-gcp-n N=5
 ```
+
+**El LLM no tiene por qué ser de GCP.** `make attack-gcp` pasa `--require-gcp`, que exige que *todo*, el LLM incluido, sea GCP real, y por eso usa solo Vertex AI. Sin esa bandera el ataque también corre con servicios de seguridad reales y el LLM de otro proveedor (Groq, NVIDIA u OpenRouter). Con `.env.gcp` cargado y las variables del LLM pisadas, y las API keys en `backend/.env`:
+
+```bash
+set -a; . ./.env.gcp; set +a
+LLM_PROVIDER=litellm ORCHESTRATOR_PROVIDER=openrouter ORCHESTRATOR_MODEL=nvidia/nemotron-3.5-super-vl:free make attack
+```
+
+Es lo que se hizo en las corridas "Seguridad GCP real" de la tabla de resultados. En el JSON de cada corrida, `services.used` indica qué servicios fueron GCP y cuáles cayeron a local.
 
 Qué servicios se crean, con qué permisos y credenciales, y cómo bajarlos (`make destroy-gcp`) en [`docs/gcp_deployment_and_iam.md`](docs/gcp_deployment_and_iam.md), sección 2.
 

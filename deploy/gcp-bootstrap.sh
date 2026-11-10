@@ -207,7 +207,6 @@ set_env_var GCS_BUCKET_NAME "$([ "$WITH_GCS" -eq 1 ] && echo "$BUCKET" || echo "
 ensure_env_var ENVIRONMENT production
 ensure_env_var SECURITY_MODE gcp_live
 ensure_env_var LLM_PROVIDER vertexai
-ensure_env_var LLM_MODEL ""
 ensure_env_var VERTEX_MODEL_NAME gemini-3.1-flash-lite
 ensure_env_var VERTEX_LOCATION global
 ensure_env_var CHECKPOINTER_TYPE firestore
