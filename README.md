@@ -101,11 +101,12 @@ Abre `http://localhost:8765/` con un visor HTML offline: cronología, plan y rep
 ## Tests
 
 ```bash
-make test        # suite completa (usa backend/.venv)
+make test        # suite offline: sin red ni credenciales (usa backend/.venv)
+make test-live   # evals y tests con LLM real (consumen tokens; se omiten sin credenciales)
 ```
 
-- **Offline** (no necesitan red ni claves): casi toda la suite, incluidos PEP, sanitizer, plan/replan del Orchestrator con LLM simulado, servidor MCP y los escenarios de control.
-- **Con LLM real** (se omiten sin credenciales): `test_orchestrator_evals.py`, `test_readonly_agent_evals.py`, `test_action_agent_evals.py` y `test_attack_3_1_e2e_evals.py`. Algunos suben resultados a LangSmith si hay `LANGSMITH_API_KEY`.
+- **Offline** (`backend/tests/unit/` y la mayor parte de `integration/`; no necesitan red ni claves): incluye PEP, sanitizer, plan/replan del Orchestrator con LLM simulado, servidor MCP y los escenarios de control.
+- **Con LLM real** (llevan el marker `requires_live_llm`, `make test` los deselecciona y sin credenciales se omiten): los de `backend/tests/evals/` (`test_orchestrator_evals.py`, `test_readonly_agent_evals.py`, `test_action_agent_evals.py` y `test_attack_3_1_e2e_evals.py`) y algunos de `backend/tests/integration/`. Vertex AI solo cuenta como disponible con `LLM_PROVIDER=vertexai`; tener credenciales de `gcloud` no alcanza. Algunos suben resultados a LangSmith si hay `LANGSMITH_API_KEY`.
 - Política OPA: `opa test policies/`.
 - Calidad: `cd backend && ruff check . ../mcp_financial_action_server ../scripts && ruff format --check .` (los mismos pasos corren en GitHub Actions, `.github/workflows/ci.yml`).
 
@@ -120,6 +121,16 @@ La matriz completa y el registro de fallos con modelo real están en [`docs/test
 | LLM | `LLM_PROVIDER` (Groq, NVIDIA, OpenRouter...) | Vertex AI u otro proveedor |
 | Documento adjunto | `backend/local_storage/comprobante.txt` | Bucket con `USE_GCS_INGESTION=true` (cae al archivo local si no existe) |
 | PDP | OPA en contenedor | OPA en contenedor |
+
+Para correr el ataque contra servicios reales de GCP desde tu máquina (Model Armor, Cloud DLP, Firestore, bucket y Vertex AI; con tu propio proyecto):
+
+```bash
+make build-gcp PROJECT=<tu-proyecto>   # crea y configura todo (idempotente) y escribe .env.gcp
+make smoke-gcp                         # prueba cada servicio real
+make attack-gcp                        # escenario 3.1; N repeticiones con make attack-gcp-n N=5
+```
+
+Detalle, requisitos y limpieza (`make destroy-gcp`) en [`docs/gcp_deployment_and_iam.md`](docs/gcp_deployment_and_iam.md), sección 3.c.
 
 Plantillas de entorno: `.env.example`, `.env.development.example`, `.env.production.example`. Setup de Model Armor, IAM y despliegue en [`docs/gcp_deployment_and_iam.md`](docs/gcp_deployment_and_iam.md). Si el PDP no responde, el PEP **deniega** (`PDP_FALLBACK_MODE=deny`); con `hitl` degrada a aprobación humana.
 
@@ -137,7 +148,7 @@ Plantillas de entorno: `.env.example`, `.env.development.example`, `.env.product
 - Identidad con SPIFFE/SPIRE y mTLS, Analytics, memoria de largo plazo y los escenarios 3.2 y 4.2 del informe.
 - Mitigaciones (CaMeL, FIDES, SEAgent, control de procedencia): se implementarán después, conmutables y apagadas por defecto.
 - La política de OPA solo restringe transferencias (monto y destinatario); cualquier otra herramienta se permite. El alta de beneficiario pasa por el PDP pero no tiene reglas propias, por eso el ataque la atraviesa.
-- Con `local_mock`, DLP y Model Armor son simulaciones; el checkpointer `firestore` hoy cae a memoria.
+- Con `local_mock`, DLP y Model Armor son simulaciones; el checkpointer `firestore` persiste en Cloud Firestore y solo cae a memoria (con aviso en el log) si el servicio no responde.
 
 ## Documentación
 

@@ -159,10 +159,28 @@ Por defecto el guardrail es `LocalModelArmorGuard` (regex léxicas, `backend/app
 **Comportamiento a tener en cuenta**
 
 - El mismo `ModelArmorGuard` inspecciona el mensaje del usuario y el contenido del documento que lee `read_document_tool`.
-- Si Model Armor no marca amenaza, el texto igual pasa por el guardrail local. Si falla la llamada a GCP, se registra una advertencia y se usa el guardrail local (la PoC no falla cerrado ante un error del servicio).
+- Cuando Model Armor responde (seguro o amenaza), su veredicto es **final**: el guardrail local no se consulta. Solo se usa el local si `USE_GCP_MODEL_ARMOR` está apagado, o si el cliente no se pudo crear o la llamada falla. En ese caso se registra una advertencia y queda anotado en `service_status` (la PoC no falla cerrado ante un error del servicio). Cada corrida guardada en `docs/evidence/runs/` indica en `services.used` qué servicios sirvió GCP y cuáles cayeron a local.
 - En la PoC el comprobante está escrito para parecer un documento legítimo, de modo que **se espera que pase** Model Armor: el ataque 3.1 es semántico y no contiene firmas léxicas de jailbreak. Si en tu plantilla lo bloquea, la corrida termina en `BLOCKED` desde el sanitizer y eso es un resultado válido de medición.
 
-**Estado de la evidencia:** el flujo con Model Armor real **no está verificado** en este repositorio. Falta una corrida en `gcp_live` con un proyecto GCP propio; cuando se haga, `make attack` la guarda en `docs/evidence/runs/` con el modo `gcp_live` en su cabecera.
+**Estado de la evidencia:** las corridas de `make attack-gcp` guardadas en `docs/evidence/runs/` (campo `pure_gcp: true`) usaron Model Armor, Cloud DLP, Firestore, el bucket y Vertex AI reales, sin fallbacks a local, y el comprobante pasó Model Armor (`document_read: true`). Los resultados por modelo están en [`docs/analisis_modelos_ataque.md`](analisis_modelos_ataque.md) (sección 3c) y en [`docs/modelos_probados.md`](modelos_probados.md). Con los modelos de Vertex AI probados, ninguna de esas corridas terminó en transferencia.
+
+---
+
+## 3.c Modo GCP real desde tu máquina (`make build-gcp` → `smoke-gcp` → `attack-gcp`)
+
+Ejecuta el ataque 3.1 en local contra servicios reales de GCP (sin desplegar Cloud Run). Todo se hace con las credenciales de **tu** usuario y en **tu** proyecto.
+
+**Requisitos:** `gcloud` instalado, `gcloud auth application-default login`, un proyecto con facturación vinculada, rol Owner/Editor (o, como mínimo, Service Usage Admin, Datastore Owner, Model Armor Admin y Storage Admin) y Docker para levantar OPA.
+
+| Comando | Qué hace |
+| :--- | :--- |
+| `make build-gcp PROJECT=<id>` | Idempotente. Habilita las APIs (DLP, Vertex AI, Firestore, Model Armor, Storage), crea la base Firestore, la plantilla de Model Armor `aegisbank-template` y un bucket con el comprobante, y escribe `.env.gcp` (ignorado por git, con un `TOKEN_VAULT_SECRET` propio). Termina con los smoke tests. Opciones por `ARGS`: `--dry-run`, `--yes`, `--region`, `--no-gcs`, `--skip-smoke`, `--with-sa`. |
+| `make smoke-gcp` | Prueba DLP, Model Armor, Vertex AI, Firestore y GCS reales antes de gastar una corrida. |
+| `make attack-gcp` | Escenario 3.1 con `.env.gcp` cargado. `GCS=false` lee el comprobante de `backend/local_storage/`. Usa `--require-gcp`: se niega a correr (código de salida 3) si algún servicio, **incluido el LLM**, no es GCP real, y termina con código 3 si una corrida usó un fallback local (no es una medición 100% GCP). |
+| `make attack-gcp-n N=5` | Lo mismo `N` veces, con tasas. |
+| `make destroy-gcp` | Borra lo que creó `build-gcp` (bucket, plantilla, checkpoints); pide confirmación. |
+
+`.env.gcp` fija `LLM_PROVIDER=vertexai`, así que todos los agentes usan el mismo modelo de Vertex AI (`VERTEX_MODEL_NAME`, `VERTEX_LOCATION`) y no hay proveedores de respaldo. Cada corrida se guarda en `docs/evidence/runs/` con `services.used` y `pure_gcp`. No medí el costo de estas corridas.
 
 ---
 
@@ -181,4 +199,4 @@ gcloud logging read "resource.type=cloud_run_revision AND resource.labels.servic
 
 El `pep_node` consulta la política OPA en `PDP_URL` (en `docker-compose.yml` apunta al servicio `opa`). `deploy/cloudrun-service.yaml` **no despliega OPA** (solo define `PDP_URL`): sin PDP accesible se aplica `PDP_FALLBACK_MODE` (por defecto `deny`) y cada alta de destinatario y cada transferencia termina `FAILED`. Para un despliegue funcional hay que publicar OPA (p. ej. un segundo servicio de Cloud Run, con una imagen `openpolicyagent/opa` que incluya `policies/` y ejecute `opa run --server --addr=0.0.0.0:$PORT /policies`; ese paso no está automatizado ni probado en este repo) y configurar `PDP_URL=https://<servicio-opa>/v1/data/transaction/decision`. Si el servicio OPA exige autenticación, el backend tendría que enviar un token de identidad, y `pep_node` hoy no lo hace: dejá OPA accesible solo desde el backend por red interna o ingress restringido. Con `PDP_FALLBACK_MODE=hitl` las transferencias pasan a aprobación humana, pero las altas siguen fallando cerradas. El despliegue en GCP no forma parte de la demo local de la PoC.
 
-Además, `CHECKPOINTER_TYPE=firestore` hoy usa igualmente `MemorySaver` (ver `docs/architecture.md`, sección 4).
+`CHECKPOINTER_TYPE=firestore` persiste los checkpoints en Cloud Firestore; si el servicio no responde al iniciar, el backend cae a `MemorySaver` y lo registra (ver `docs/architecture.md`, sección 4).

@@ -235,7 +235,7 @@ def check_model_armor() -> CheckResult:
             cost,
             hints=[
                 f"Motivo del fallback: {snap.get('last_fallback_reason')}",
-                f"La plantilla debe existir: {template} (la crea `make build-gcp`; ver docs/plan_gcp_integration.md).",
+                f"La plantilla debe existir: {template} (la crea `make build-gcp`; ver docs/gcp_deployment_and_iam.md, sección 3.c).",
                 "Habilitá la API: gcloud services enable modelarmor.googleapis.com",
                 "Rol requerido: roles/modelarmor.user.",
             ],

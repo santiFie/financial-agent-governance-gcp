@@ -44,11 +44,11 @@ Backend (run from `backend/`, venv at `backend/.venv`):
 ```bash
 pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload   # API docs at /docs
-pytest -v                                                   # full suite
-pytest tests/test_pep_node.py -v                            # one file
-pytest tests/test_router_planner.py::test_name -v           # one test
+pytest -m "not requires_live_llm" -v                        # offline suite (no network, no credentials)
+pytest tests/unit/test_pep_node.py -v                       # one file
+pytest tests/unit/test_router_planner.py::test_name -v      # one test
 ```
-From the repo root, `make test` runs `backend/tests` with the venv pytest.
+Tests live in `backend/tests/unit/` (offline, mocked LLM), `integration/` (API and graph; the ones that call an LLM are marked), `evals/` (live LLM) and `data/`/`fixtures/` (ground truth and documents). From the repo root, `make test` runs the offline suite and `make test-live` the tests marked `requires_live_llm`.
 
 MCP action server (run from the repo root, since it's imported as a package):
 ```bash
@@ -61,10 +61,10 @@ Frontend (`frontend/`): `npm install`, `npm run dev` (port 3000), `npm run build
 Full stack via Docker Compose: `make up-dev` (`.env.development`, `SECURITY_MODE=local_mock`, no GCP), `make up-prod` (`.env.production`, real Cloud DLP / Vertex / Firestore), `make down`, `make logs`.
 
 ### Token economy for live-LLM tests
-Only run tests that call a real LLM (the `*_evals.py` files, `test_graph_flow.py`, `test_api.py` and anything marked `requires_live_llm`) when the code or tests they exercise were modified in the current change and the run is needed to validate it. If nothing related to a live test was touched (code, prompts, ground truth or the test itself), do NOT run it, to avoid wasting tokens. Prefer the offline suite for validation and say explicitly which live tests were skipped and why.
+Only run tests that call a real LLM (everything in `tests/evals/`, `test_graph_flow.py`, `test_api.py` and anything marked `requires_live_llm`) when the code or tests they exercise were modified in the current change and the run is needed to validate it. If nothing related to a live test was touched (code, prompts, ground truth or the test itself), do NOT run it, to avoid wasting tokens. Prefer the offline suite for validation and say explicitly which live tests were skipped and why.
 
 ### Live-LLM evals
-`tests/test_readonly_agent_evals.py` and `tests/test_action_agent_evals.py` call a real LLM. They are skipped automatically unless `is_live_llm_available()` finds credentials for the configured provider. Some cases also need `LANGSMITH_API_KEY`/`LANGCHAIN_API_KEY`. Ground truth for the action agent lives in `tests/data/action_agent_ground_truth.json`, and the evaluators are in `tests/decision_models_evaluators.py`. Every other test is offline and mocks the LLM. `docs/tests_and_evaluation.md` lists which tests need network access.
+Everything in `tests/evals/` (orchestrator, readonly agent, action agent, attack 3.1 E2E) and some tests in `tests/integration/` call a real LLM. They carry the `requires_live_llm` marker through `tests/live_llm.py` (`@requires_live_llm` or `pytestmark = live_llm_marks`): `make test` and CI deselect it, and a plain `pytest` skips them when `live_llm_available()` finds no credentials. Vertex AI only counts as available with `LLM_PROVIDER=vertexai`, so gcloud ADC on the machine never triggers a real call by accident. Some cases also need `LANGSMITH_API_KEY`/`LANGCHAIN_API_KEY`. Ground truth for the action agent lives in `tests/data/action_agent_ground_truth.json`, and the evaluators are in `tests/decision_models_evaluators.py`. Every other test is offline and mocks the LLM. `docs/tests_and_evaluation.md` lists which tests need network access.
 
 ## Architecture
 
@@ -87,7 +87,7 @@ Mutations and reads go through `MCPActionClient`, which imports the tool functio
 ### Cross-cutting
 - `app/config.py` (pydantic-settings, reads `.env`) holds the key switches. `SECURITY_MODE` is `local_mock` or `gcp_live`. `LLM_PROVIDER` defaults to `litellm`, which falls back groq → nvidia → vertexai → openrouter; it can also be set to a single provider. `CHECKPOINTER_TYPE` is `memory` or `firestore`. There are also flags for GCS document ingestion and GCP Model Armor.
 - `core/llm.py` `get_chat_model()` is the only LLM factory. It raises `LLMConfigurationError` when no provider has valid credentials, so nodes must build the LLM lazily (inside the node function), never at import time.
-- Prompts are YAML files in `app/prompts/`, loaded and validated by `core/prompt_manager.py` (each declares `name`, `version`, `required_variables`, `system_template`). Reference them by `name`, not by filename. `tests/test_prompts.py` validates them.
+- Prompts are YAML files in `app/prompts/`, loaded and validated by `core/prompt_manager.py` (each declares `name`, `version`, `required_variables`, `system_template`). Reference them by `name`, not by filename. `tests/unit/test_prompts.py` validates them.
 - Tracing uses LangSmith through `core/telemetry.py` (`build_trace_config`).
 - Deployment targets Cloud Run (`deploy/`, `docs/gcp_deployment_and_iam.md`). Design rationale is in `docs/architecture.md` and `docs/governance_and_security.md`.
 

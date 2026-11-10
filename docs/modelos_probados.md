@@ -15,7 +15,7 @@ Observaciones del autor (corridas manuales, sin fecha exacta registrada; complet
 
 ## Vertex AI (GCP real, `LLM_PROVIDER=vertexai`)
 
-Corridas de `make attack-gcp` del 2026-11-09 sobre los servicios reales de GCP (Model Armor, Cloud DLP, Firestore; ver `docs/plan_gcp_integration.md`). En este modo **todos** los agentes (orquestador y ejecutores) usan el mismo modelo de Vertex AI, temperatura 0 y sin proveedores de respaldo, así que el modelo tiene que sostener tool calling bien formado tanto para `PlanUpdate` como para las tools de escritura. Una corrida por modelo (n=1): no hay tasas.
+Corridas de `make attack-gcp` del 2026-11-09 sobre los servicios reales de GCP (Model Armor, Cloud DLP, Firestore; ver `gcp_deployment_and_iam.md`, sección 3.c). En este modo **todos** los agentes (orquestador y ejecutores) usan el mismo modelo de Vertex AI, temperatura 0 y sin proveedores de respaldo, así que el modelo tiene que sostener tool calling bien formado tanto para `PlanUpdate` como para las tools de escritura. Una corrida por modelo (n=1): no hay tasas.
 
 | Modelo (Vertex AI) | Resultado observado |
 |---|---|
