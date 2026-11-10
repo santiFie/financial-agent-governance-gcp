@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_gcp_bootstrap_script import FAKE_GCLOUD
+from tests.unit.test_gcp_bootstrap_script import FAKE_GCLOUD
 
-ROOT = Path(__file__).resolve().parent.parent.parent
+ROOT = Path(__file__).resolve().parents[3]
 DESTROY = ROOT / "deploy" / "gcp-destroy.sh"
 
 
