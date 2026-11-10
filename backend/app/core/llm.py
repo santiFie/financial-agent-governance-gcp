@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from app.config import settings
+from app.core.service_status import GCP, LOCAL, service_status
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +55,13 @@ def _check_nvidia_deployment(temperature: float, model: Optional[str] = None) ->
     }
 
 
-def _check_vertexai_deployment(temperature: float, model: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """Verifies GCP project, location and credentials for Vertex AI."""
+def _check_vertexai_deployment(
+    temperature: float, model: Optional[str] = None, require_adc: bool = False
+) -> Optional[Dict[str, Any]]:
+    """
+    Verifies GCP project, location and credentials for Vertex AI.
+    With `require_adc` (Vertex-only mode) a Gemini API key does NOT count as credentials: Vertex AI needs ADC.
+    """
     project = (
         settings.gcp_project_id
         or os.getenv("GCP_PROJECT_ID")
@@ -63,7 +69,8 @@ def _check_vertexai_deployment(temperature: float, model: Optional[str] = None) 
         or os.getenv("VERTEXAI_PROJECT")
     )
     location = (
-        settings.gcp_location
+        settings.vertex_location
+        or settings.gcp_location
         or os.getenv("GCP_LOCATION")
         or os.getenv("GOOGLE_CLOUD_LOCATION")
         or os.getenv("VERTEXAI_LOCATION")
@@ -93,7 +100,7 @@ def _check_vertexai_deployment(temperature: float, model: Optional[str] = None) 
 
     # Also accept Gemini / Google API key if ADC is not set up
     gemini_key = settings.gemini_api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not has_creds and gemini_key and not gemini_key.startswith("your-"):
+    if not require_adc and not has_creds and gemini_key and not gemini_key.startswith("your-"):
         has_creds = True
 
     if not project or not has_creds:
@@ -155,6 +162,16 @@ def get_available_deployments(
     if provider and provider not in {n for n, _ in providers_order}:
         raise LLMConfigurationError(f"Provider LLM desconocido: '{provider}'.")
 
+    # Vertex-only mode: no fallback providers (groq/nvidia/openrouter) and no API-key substitute for ADC.
+    if provider == "vertexai":
+        dep = _check_vertexai_deployment(temperature, model, require_adc=True)
+        if dep is None:
+            raise LLMConfigurationError(
+                "El provider 'vertexai' fue solicitado pero faltan credenciales ADC (gcloud auth application-default "
+                "login) o el proyecto de GCP."
+            )
+        return [dep]
+
     deployments: List[Dict[str, Any]] = []
     for name, check_fn in providers_order:
         if name == provider:
@@ -172,6 +189,32 @@ def get_available_deployments(
     return deployments
 
 
+def effective_provider(provider: Optional[str] = None) -> Optional[str]:
+    """
+    Provider that get_chat_model() will put first. `None` means the multi-provider LiteLLM chain.
+    LLM_PROVIDER=vertexai applies to every caller that does not name a provider.
+    """
+    if provider:
+        return provider.lower()
+    return "vertexai" if (settings.llm_provider or "").lower() == "vertexai" else None
+
+
+def describe_llm(provider: Optional[str] = None, model: Optional[str] = None) -> str:
+    """Human-readable ID of the model a call to get_chat_model(provider, model) uses (for logs and run evidence)."""
+    chosen = effective_provider(provider)
+    if chosen == "vertexai":
+        location = settings.vertex_location or settings.gcp_location
+        return f"vertexai/{model or settings.vertex_model_name}@{location}"
+    if chosen:
+        default_model = getattr(settings, f"{chosen}_model", None)
+        return f"{chosen}/{model or default_model or 'default'}"
+    try:
+        chain = [d["litellm_params"]["model"] for d in get_available_deployments()]
+    except Exception:
+        chain = []
+    return "litellm(" + " -> ".join(chain) + ")" if chain else "litellm(sin credenciales)"
+
+
 def get_chat_model(
     temperature: float = 0.0,
     provider: Optional[str] = None,
@@ -180,6 +223,7 @@ def get_chat_model(
     """
     Instantiates and returns a LangChain chat model with LiteLLM Router fallbacks.
     Order of fallbacks: groq -> nvidia -> vertexai -> openrouter.
+    With LLM_PROVIDER=vertexai (or provider="vertexai") the chain is Vertex AI only, with no fallbacks.
     Only providers with verified credentials/parameters are included in the fallback chain.
     If `provider` is given it is placed first in the chain; `model` overrides that provider's
     default model (if `model` is None the provider's default model is used).
@@ -188,6 +232,10 @@ def get_chat_model(
     configured_provider = (settings.llm_provider or "").lower()
     if configured_provider and configured_provider not in KNOWN_PROVIDERS:
         raise LLMConfigurationError(f"Provider LLM desconocido: '{settings.llm_provider}'.")
+
+    # LLM_PROVIDER=vertexai applies to every agent (they call this factory without `provider`).
+    if provider is None and configured_provider == "vertexai":
+        provider = "vertexai"
 
     model_list = get_available_deployments(temperature=temperature, provider=provider, model=model)
 
@@ -198,6 +246,7 @@ def get_chat_model(
         )
 
     primary_name = model_list[0]["model_name"]
+    service_status.record("llm", GCP if primary_name == "vertexai" else LOCAL)
     fallback_targets = [m["model_name"] for m in model_list[1:]]
 
     fallbacks = [{primary_name: fallback_targets}] if fallback_targets else None

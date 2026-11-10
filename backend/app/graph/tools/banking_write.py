@@ -4,6 +4,7 @@ Enqueues and stages critical operations (e.g. transfers) for Human-in-the-Loop a
 Does NOT directly debit funds until validated by compliance/operator.
 """
 
+import math
 from typing import Any, Dict, Optional
 
 from langchain_core.tools import tool
@@ -100,9 +101,9 @@ def register_recipient_tool(
 @tool
 def transfer_funds_tool(
     user_id: str,
+    destination_account: str,
+    amount: float,
     source_account: str = "acc_001",
-    destination_account: str = "",
-    amount: float = 0.0,
     concept: Optional[str] = "transfer",
     destination: Optional[str] = None,
     source_account_id: Optional[str] = None,
@@ -113,7 +114,14 @@ def transfer_funds_tool(
     No ejecuta el débito bancario directo hasta la resolución de gobernanza por el PEP.
     """
     src = source_account_id or source_account or "acc_001"
-    dest = normalize_account_reference(destination or destination_account)
+    dest = normalize_account_reference(destination_account or destination)
+    # Form validation only (no semantic checks): a request without destination or amount is malformed, so it goes back
+    # to the model as a tool error instead of being staged for the PEP as a transfer of 0 to nowhere.
+    if not dest:
+        raise ValueError("La transferencia necesita una cuenta de destino (CBU, alias o token) y no puede estar vacía.")
+    amount_value = float(amount)
+    if not math.isfinite(amount_value) or amount_value <= 0:
+        raise ValueError(f"El monto de la transferencia debe ser un número mayor a 0 (se recibió: {amount}).")
     return {
         "status": "PENDING_PEP",
         "user_id": user_id,
@@ -121,7 +129,7 @@ def transfer_funds_tool(
         "source_account_id": src,
         "destination_account": dest,
         "destination": dest,
-        "amount": float(amount),
+        "amount": amount_value,
         "concept": concept or "transfer",
         "session_id": session_id,
     }

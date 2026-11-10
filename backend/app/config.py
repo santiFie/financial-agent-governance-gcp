@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # - "litellm": Multi-provider with dynamic fallbacks (groq -> nvidia -> vertexai -> openrouter)
     # - "groq": Ultra-fast free tier on console.groq.com (Llama 3.3 70B)
     # - "nvidia": Free tier on build.nvidia.com (NIM Llama 3.3)
-    # - "vertexai": Google Cloud Vertex AI Gemini (uses GCP Cloud Billing / credits)
+    # - "vertexai": Google Cloud Vertex AI Gemini (uses GCP Cloud Billing / credits). Vertex ONLY: no fallback providers.
     # - "openrouter": OpenRouter API
     # - "google_genai": Google AI Studio free tier via GEMINI_API_KEY
     llm_provider: Literal["litellm", "groq", "nvidia", "vertexai", "openrouter", "google_genai"] = "litellm"
@@ -54,13 +54,18 @@ class Settings(BaseSettings):
     # Google Cloud Platform configuration
     gcp_project_id: str = "demo-fintech-project"
     gcp_location: str = "us-central1"
-    vertex_model_name: str = "gemini-1.5-flash-002"
+    # Provisional default: the definitive model is confirmed by the GCP smoke test (docs/plan_gcp_integration.md).
+    vertex_model_name: str = "gemini-3.1-flash-lite"
+    # Vertex AI region for the LLM when it differs from GCP_LOCATION (some Gemini models are only served from "global").
+    vertex_location: Optional[str] = None
 
     # LangGraph Checkpointer
     # - "memory": MemorySaver (zero external dependency, ideal for local tests)
     # - "firestore": Cloud Firestore (scalable, zero idle cost in GCP Free Tier)
     checkpointer_type: Literal["memory", "firestore"] = "memory"
     firestore_collection: str = "langgraph_checkpoints"
+    # Optional: seconds until a checkpoint document expires (field `expire_at`, usable by a Firestore TTL policy).
+    firestore_checkpoint_ttl_seconds: Optional[int] = None
 
     # Secret key for the reversible token vault (never leaked to LLM).
     # The default is for local development only: ENVIRONMENT=production refuses to start with it.
@@ -103,6 +108,13 @@ class Settings(BaseSettings):
     )
     orchestrator_max_tool_iterations: int = Field(
         default=3, description="Maximum consecutive Orchestrator tool rounds before a plan update"
+    )
+
+    # Executor agents (readonly_agent / action_agent) safety limit
+    executor_max_tool_rounds: int = Field(
+        default=4,
+        ge=1,
+        description="Maximum tool rounds (model -> tools) an executor agent may run for one plan step",
     )
 
     @model_validator(mode="after")

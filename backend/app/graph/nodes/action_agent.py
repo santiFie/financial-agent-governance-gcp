@@ -16,6 +16,7 @@ from langgraph.prebuilt import ToolNode, create_react_agent
 from app.core.llm import get_chat_model
 from app.core.prompt_manager import prompt_manager
 from app.core.security_context import normalize_account_reference
+from app.graph.executor_limits import GraphRecursionError, bound_executor_config, limit_reached_message
 from app.graph.plan_utils import complete_active_step, get_active_step
 from app.graph.state import AgentState
 from app.graph.tools.banking_write import (
@@ -66,10 +67,20 @@ def action_agent_node(state: AgentState, config: RunnableConfig = None) -> Dict[
         user_id=user_id,
         source_acc=SOURCE_ACCOUNT,
     )
-    result = _build_executor().invoke(
-        {"messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": task}]},
-        config=exec_config,
-    )
+    try:
+        result = _build_executor().invoke(
+            {"messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": task}]},
+            config=bound_executor_config(exec_config),
+        )
+    except GraphRecursionError:
+        # The model kept calling tools without finishing the step: nothing is staged, so nothing reaches the PEP.
+        step_output = limit_reached_message("action_agent", "No se realizó ninguna acción.")
+        return {
+            "final_response": step_output,
+            "messages": [AIMessage(content=f"[Action Agent]: {step_output}")],
+            "status": "COMPLETED",
+            "execution_plan": complete_active_step(state, step_output),
+        }
 
     messages = result["messages"]
     step_output = _text(messages[-1].content)

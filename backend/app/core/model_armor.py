@@ -9,6 +9,7 @@ import re
 from typing import Optional, Tuple
 
 from app.config import settings
+from app.core.service_status import GCP, LOCAL, LOCAL_FALLBACK, service_status
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +70,9 @@ class LocalModelArmorGuard:
 class HybridModelArmorGuard:
     """
     Hybrid Model Armor wrapper:
-    - Uses Google Cloud Model Armor via ModelArmorSanitizePromptRunnable when enabled.
-    - Falls back to LocalModelArmorGuard when disabled, offline, or upon client error.
+    - Uses Google Cloud Model Armor via ModelArmorSanitizePromptRunnable when enabled. When the GCP service answers
+      (safe or flagged), its verdict is final: the local guardrail is NOT consulted.
+    - Falls back to LocalModelArmorGuard (logged and recorded) when GCP is disabled, unreachable or fails.
     """
 
     def __init__(self):
@@ -91,7 +93,10 @@ class HybridModelArmorGuard:
                         template_id=settings.model_armor_template_id,
                     )
                 except Exception as e:
-                    logger.warning(f"No se pudo inicializar GCP Model Armor: {e}. Usando guardrail local.")
+                    logger.warning(
+                        "[MODEL ARMOR] No se pudo inicializar el servicio GCP (%s): se usa el guardrail LOCAL.", e
+                    )
+                    service_status.record("model_armor", LOCAL_FALLBACK, f"init: {e}")
                     self._gcp_runnable = None
         return self._gcp_runnable
 
@@ -100,24 +105,28 @@ class HybridModelArmorGuard:
         Inspects input text for security threats using GCP Model Armor or local guardrail.
         """
         runnable = self._get_runnable()
-        if runnable is not None:
-            try:
-                res = runnable.invoke(text)
-                if isinstance(res, dict) and res.get("is_threat"):
-                    return (
-                        True,
-                        res.get("threat_category", "MODEL_ARMOR_VIOLATION"),
-                        res.get("threat_reason", "GCP Model Armor detected threat"),
-                    )
-                return self.local_guard.inspect(text)
-            except Exception as e:
-                err_msg = str(e).lower()
-                if "violation" in err_msg or "blocked" in err_msg or "threat" in err_msg:
-                    return True, "MODEL_ARMOR_VIOLATION", str(e)
-                logger.warning(f"Error invocando GCP Model Armor: {e}. Realizando fallback local.")
-                return self.local_guard.inspect(text)
+        if runnable is None:
+            if settings.use_gcp_model_armor and settings.model_armor_template_id:
+                # GCP was requested but its client could not be built (already logged at initialization).
+                service_status.record("model_armor", LOCAL_FALLBACK, "client not initialized")
+            else:
+                service_status.record("model_armor", LOCAL)
+            return self.local_guard.inspect(text)
 
-        return self.local_guard.inspect(text)
+        try:
+            # The runnable returns its input when the text is safe and raises ValueError when Model Armor flags it.
+            runnable.invoke(text)
+        except ValueError as e:
+            service_status.record("model_armor", GCP)
+            return True, "MODEL_ARMOR_VIOLATION", str(e) or "GCP Model Armor detected threat"
+        except Exception as e:
+            logger.warning("[MODEL ARMOR] Falló la llamada al servicio GCP (%s): se usa el guardrail LOCAL.", e)
+            service_status.record("model_armor", LOCAL_FALLBACK, f"invoke: {e}")
+            return self.local_guard.inspect(text)
+
+        # GCP Model Armor answered "safe": its verdict is final, the local guardrail is not consulted.
+        service_status.record("model_armor", GCP)
+        return False, None, None
 
     def inspect_prompt(self, text: str) -> Tuple[bool, Optional[str], Optional[str]]:
         """Unified method alias for prompt and document inspection."""

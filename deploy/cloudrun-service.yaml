@@ -40,7 +40,7 @@ spec:
         - name: GCP_LOCATION
           value: "us-central1"
         - name: VERTEX_MODEL_NAME
-          value: "gemini-1.5-flash-002"
+          value: "gemini-3.1-flash-lite"
         - name: LLM_PROVIDER
           value: "vertexai"
         # Reversible token vault key. Create it first: gcloud secrets create token-vault-secret --data-file=-

@@ -6,7 +6,8 @@
 
 DOCKER_COMPOSE ?= docker compose
 
-.PHONY: help up-dev up-prod down logs ps test restart-dev restart-prod opa-up attack attack-n attack-control server-results
+.PHONY: help up-dev up-prod down logs ps test restart-dev restart-prod opa-up attack attack-n attack-control server-results \
+	build-gcp smoke-gcp attack-gcp attack-gcp-n destroy-gcp require-gcp-env
 
 PYTHON ?= $(shell [ -x backend/.venv/bin/python ] && echo backend/.venv/bin/python || echo python3)
 N ?= 5
@@ -25,6 +26,11 @@ help:
 	@echo "  make attack-n N=5 Repite el escenario N veces y reporta tasas"
 	@echo "  make attack-control  Caso de contraste: transferencia a destinatario no confiable (debe ir a HITL)"
 	@echo "  make server-results  Abre el visor HTML de corridas guardadas (sin LLM ni Docker)"
+	@echo "  make build-gcp    Crea y configura en TU proyecto GCP todo lo necesario (PROJECT=<id>; ver docs/plan_gcp_integration.md)"
+	@echo "  make smoke-gcp    Smoke tests de DLP, Model Armor, Vertex AI, Firestore y GCS (servicios reales)"
+	@echo "  make attack-gcp   Escenario 3.1 contra los servicios reales de GCP (GCS=false para el documento local)"
+	@echo "  make attack-gcp-n N=5  Repite el escenario N veces contra GCP y reporta tasas"
+	@echo "  make destroy-gcp  Borra lo creado por build-gcp (bucket, plantilla, checkpoints; pide confirmación)"
 	@echo "  make restart-dev  Reinicia el entorno local de desarrollo"
 	@echo "  make restart-prod Reinicia el entorno de producción"
 	@echo ""
@@ -100,3 +106,34 @@ server-results:
 restart-dev: down up-dev
 
 restart-prod: down up-prod
+
+# ------------------------------------------------------------------------------
+# GCP real (Model Armor, Cloud DLP, Vertex AI, Firestore, GCS) con las credenciales de TU usuario.
+#   make build-gcp PROJECT=mi-proyecto   crea/configura todo (idempotente) y escribe .env.gcp
+#   make attack-gcp                      ejecuta el ataque contra esos servicios
+#   make destroy-gcp                     borra lo creado
+# ------------------------------------------------------------------------------
+GCP_ENV_FILE ?= .env.gcp
+PROJECT ?=
+GCS ?=
+
+# .env.gcp se carga en el entorno del proceso: tiene prioridad sobre el .env de desarrollo. GCS=true|false lo pisa.
+GCP_ENV = set -a; . "$(abspath $(GCP_ENV_FILE))"; set +a; $(if $(GCS),USE_GCS_INGESTION=$(GCS))
+
+require-gcp-env:
+	@[ -f "$(GCP_ENV_FILE)" ] || { echo "❌ No existe $(GCP_ENV_FILE). Ejecutá primero: make build-gcp PROJECT=<id-del-proyecto>"; exit 1; }
+
+build-gcp:
+	deploy/gcp-bootstrap.sh $(if $(PROJECT),--project $(PROJECT)) --env-file $(GCP_ENV_FILE) $(ARGS)
+
+smoke-gcp: require-gcp-env
+	$(PYTHON) scripts/gcp_smoke_test.py --env-file $(GCP_ENV_FILE) $(if $(PROJECT),--project $(PROJECT)) $(ARGS)
+
+attack-gcp: require-gcp-env opa-up
+	@$(GCP_ENV) exec $(PYTHON) scripts/demo_attack.py --require-gcp $(ARGS)
+
+attack-gcp-n: require-gcp-env opa-up
+	@$(GCP_ENV) exec $(PYTHON) scripts/demo_attack.py --require-gcp --runs $(N) $(ARGS)
+
+destroy-gcp:
+	deploy/gcp-destroy.sh $(if $(PROJECT),--project $(PROJECT)) --env-file $(GCP_ENV_FILE) $(ARGS)
