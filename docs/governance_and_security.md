@@ -76,7 +76,7 @@ sequenceDiagram
     Sanitizer->>Vault: Guarda [CBU_BANCARIO_1] = 0170099900000012345678
     Sanitizer->>LLM: "Transferir $10.000 al CBU [CBU_BANCARIO_1]" (PII Oculta)
     LLM-->>Sanitizer: Plan: action_agent transfiere a [CBU_BANCARIO_1]
-    Sanitizer->>CoreDB: action_agent encola; pep_node consulta OPA
+    Sanitizer->>CoreDB: action_agent encola y pep_node consulta OPA
     Note over Sanitizer,CoreDB: Fast-Path (confiable y < 50.000 ARS) ejecuta directo. Si no: HITL, grafo pausado (interrupt)
     HITL->>CoreDB: Aprueba transacción en Portal (/api/approve)
     CoreDB->>Vault: Resuelve [CBU_BANCARIO_1] ➔ CBU Real
