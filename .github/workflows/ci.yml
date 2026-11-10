@@ -34,7 +34,7 @@ jobs:
           OPENROUTER_API_KEY: ""
           LANGCHAIN_API_KEY: ""
           LANGSMITH_API_KEY: ""
-        run: python -m pytest tests ../mcp_financial_action_server/tests -q -p no:cacheprovider
+        run: python -m pytest tests ../mcp_financial_action_server/tests -m "not requires_live_llm" -q -p no:cacheprovider
 
   policies:
     name: OPA policy tests
