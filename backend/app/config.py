@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     # Google Cloud Platform configuration
     gcp_project_id: str = "demo-fintech-project"
     gcp_location: str = "us-central1"
-    # Provisional default: the definitive model is confirmed by the GCP smoke test (docs/plan_gcp_integration.md).
+    # Provisional default: the definitive model is confirmed by the GCP smoke test (docs/gcp_deployment_and_iam.md, sección 3.c).
     vertex_model_name: str = "gemini-3.1-flash-lite"
     # Vertex AI region for the LLM when it differs from GCP_LOCATION (some Gemini models are only served from "global").
     vertex_location: Optional[str] = None

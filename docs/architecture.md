@@ -89,6 +89,6 @@ El estado compartido a lo largo de las transiciones del grafo está fuertemente 
 Para garantizar que las conversaciones y los puntos de interrupción (`interrupt`) puedan pausarse y reanudarse en arquitecturas sin estado (Serverless / Cloud Run), se implementa un Checkpointer:
 
 - **Modo Desarrollo / Local:** `MemorySaver`, que almacena los checkpoints en la memoria del proceso, ideal para testing unitario y ejecución sin dependencias de infraestructura.
-- **Modo Producción en GCP (previsto, no implementado):** **Cloud Firestore (Native Mode)**. Hoy `get_checkpointer()` (`app/db/checkpointer.py`) devuelve `MemorySaver` también con `CHECKPOINTER_TYPE=firestore`; el estado no sobrevive a reinicios del proceso.
+- **Modo GCP:** con `CHECKPOINTER_TYPE=firestore`, `get_checkpointer()` (`app/db/checkpointer.py`) devuelve un saver sobre **Cloud Firestore (Native Mode)** (`app/db/firestore_saver.py`; colección `FIRESTORE_COLLECTION`, vencimiento opcional con `FIRESTORE_CHECKPOINT_TTL_SECONDS`). Si Firestore no responde al iniciar, cae a `MemorySaver`, lo deja en el log y lo anota en `service_status`; en ese caso el estado no sobrevive a reinicios del proceso.
   - **Ventaja de Costo:** Firestore tiene un nivel gratuito permanente (1 GB y 50.000 lecturas/día), permitiendo operar el asistente sin gastar el crédito de $300 en instancias activas como Cloud SQL.
   - **Cifrado en Reposo:** Todos los datos en Firestore están encriptados por defecto con llaves administradas por Google (CMEK o Google-managed keys).

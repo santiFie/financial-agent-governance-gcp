@@ -27,7 +27,7 @@ help:
 	@echo "  make attack-n N=5 Repite el escenario N veces y reporta tasas"
 	@echo "  make attack-control  Caso de contraste: transferencia a destinatario no confiable (debe ir a HITL)"
 	@echo "  make server-results  Abre el visor HTML de corridas guardadas (sin LLM ni Docker)"
-	@echo "  make build-gcp    Crea y configura en TU proyecto GCP todo lo necesario (PROJECT=<id>; ver docs/plan_gcp_integration.md)"
+	@echo "  make build-gcp    Crea y configura en TU proyecto GCP todo lo necesario (PROJECT=<id>; ver docs/gcp_deployment_and_iam.md, sección 3.c)"
 	@echo "  make smoke-gcp    Smoke tests de DLP, Model Armor, Vertex AI, Firestore y GCS (servicios reales)"
 	@echo "  make attack-gcp   Escenario 3.1 contra los servicios reales de GCP (GCS=false para el documento local)"
 	@echo "  make attack-gcp-n N=5  Repite el escenario N veces contra GCP y reporta tasas"
