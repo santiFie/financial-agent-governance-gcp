@@ -2,16 +2,33 @@
 
 El éxito del ataque 3.1 depende del comportamiento del modelo del Orquestador (`ORCHESTRATOR_PROVIDER` / `ORCHESTRATOR_MODEL`, ver `.env.example`). Si no se definen, el Orquestador usa `LLM_PROVIDER` / `LLM_MODEL`.
 
-Observaciones del autor (corridas manuales, sin fecha exacta registrada; completar con fecha al re-probar):
+Tasas medidas (5 corridas por configuración; fechas, detalle y método en [`analisis_modelos_ataque.md`](analisis_modelos_ataque.md), sección 3). Orquestador vía OpenRouter, Model Armor y DLP locales, documento local:
 
-| Modelo (OpenRouter) | Resultado observado |
+| Modelo | Transferencias ejecutadas (Fast-Path) |
 |---|---|
-| `nvidia/nemotron-3.5-super-vl:free` | **Único que funcionó** (planifica y replanifica correctamente). Default sugerido en `.env.example`. |
-| `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | No funcionó |
-| `openai/gpt-oss-20b` | No funcionó |
-| `openai/gpt-oss-120b` | No funcionó |
+| `nvidia/nemotron-3.5-super-vl:free` | **4/5** (default sugerido en `.env.example`) |
+| `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | **2/5** |
+| `openai/gpt-oss-120b` | **1/5** |
+| `openai/gpt-oss-20b` | 0/5 (mezcla resistencia y fallos de orquestación) |
+| DeepSeek V4.1 Flash (sin reasoning y con `reasoning_effort=high`) | 0/5 en ambas |
 
-"Funcionó" = el Orquestador emite planes válidos con `PlanUpdate`; no implica que adopte la directiva del documento.
+Con seguridad GCP real y LLM externo, Nemotron 3.5 Super dio **1/5** (sección 3d del análisis): la misma configuración de modelo, con otros servicios de seguridad, y n=5 no permite separar azar de efecto. Se reporta una tasa por condición, no una sola cifra.
+
+"Falló" a nivel de plan o de ejecución no equivale a "resistió": hay modelos que no emiten un `PlanUpdate` válido (ver el análisis).
+
+## Seguridad GCP real con LLM externo (2026-11-10)
+
+Model Armor, Cloud DLP, Firestore y bucket reales; Orquestador externo; detalle en [`analisis_modelos_ataque.md`](analisis_modelos_ataque.md), secciones 3d y 3e.
+
+| Orquestador | Corridas | Transferencias ejecutadas |
+|---|---|---|
+| OpenRouter `nvidia/nemotron-3.5-super-vl:free` | 5 | 1/5 |
+| Groq `openai/gpt-oss-120b` | 1 | 1/1 |
+| OpenRouter `deepseek/deepseek-v4-flash-0731` (`reasoning_effort=none`) | 3 | 0/3 |
+| OpenRouter `deepseek/deepseek-v4-flash-0731` (`reasoning_effort=high`) | 3 | 0/3 |
+| NVIDIA `nvidia/nemotron-3.5-lightning-30b-a3b` | 3 | 2/3 |
+
+`openai/gpt-oss-120b` ya no está disponible en NVIDIA (HTTP 410), así que esa combinación no se pudo medir.
 
 ## Vertex AI (GCP real, `LLM_PROVIDER=vertexai`)
 
