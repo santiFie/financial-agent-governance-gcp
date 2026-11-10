@@ -36,7 +36,6 @@ from langsmith.evaluation import evaluate
 from mcp_financial_action_server.storage import AccountRecord, financial_storage
 
 from app.config import settings
-from app.core.llm import get_chat_model
 from app.graph.nodes.action_agent import action_agent_node
 from app.graph.state import AgentState
 from app.graph.tools.banking_write import register_recipient_tool, transfer_funds_tool
@@ -46,20 +45,12 @@ from tests.decision_models_evaluators import (
     evaluate_tool_calls_match,
     get_decision_evaluator_classifier,
 )
+from tests.live_llm import requires_live_llm
 
 logger = logging.getLogger(__name__)
 
 GROUND_TRUTH_FILE_PATH = Path(__file__).resolve().parent.parent / "data" / "action_agent_ground_truth.json"
 DATASET_NAME = os.getenv("LANGSMITH_ACTION_DATASET", "action-agent-planstep-evals")
-
-
-def is_live_llm_available() -> bool:
-    """Checks whether the configured LLM provider has usable credentials."""
-    try:
-        model = get_chat_model(temperature=0.0)
-        return model is not None
-    except Exception:
-        return False
 
 
 def load_ground_truth_data() -> List[Dict[str, Any]]:
@@ -389,9 +380,7 @@ def reset_financial_state():
     financial_storage.reset_state()
 
 
-@pytest.mark.skipif(
-    not is_live_llm_available(), reason="Requiere credenciales LLM válidas para el proveedor configurado"
-)
+@requires_live_llm
 @pytest.mark.parametrize(
     "item",
     load_ground_truth_data(),
@@ -480,9 +469,7 @@ def test_sync_ground_truth_dataset_to_langsmith():
     assert dataset.name == DATASET_NAME
 
 
-@pytest.mark.skipif(
-    not is_live_llm_available(), reason="Requiere credenciales LLM válidas para el proveedor configurado"
-)
+@requires_live_llm
 def test_langsmith_action_agent_experiment():
     """
     Runs full LangSmith experiment with evaluate() using the 3 evaluators.

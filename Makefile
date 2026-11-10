@@ -6,7 +6,7 @@
 
 DOCKER_COMPOSE ?= docker compose
 
-.PHONY: help up-dev up-prod down logs ps test restart-dev restart-prod opa-up attack attack-n attack-control server-results \
+.PHONY: help up-dev up-prod down logs ps test test-live restart-dev restart-prod opa-up attack attack-n attack-control server-results \
 	build-gcp smoke-gcp attack-gcp attack-gcp-n destroy-gcp require-gcp-env
 
 PYTHON ?= $(shell [ -x backend/.venv/bin/python ] && echo backend/.venv/bin/python || echo python3)
@@ -20,7 +20,8 @@ help:
 	@echo "  make down         Baja todos los servicios (sin eliminar volúmenes)"
 	@echo "  make logs         Muestra los logs en tiempo real de los contenedores"
 	@echo "  make ps           Muestra el estado de los contenedores"
-	@echo "  make test         Ejecuta los tests automatizados con pytest"
+	@echo "  make test         Ejecuta los tests offline (sin red ni credenciales)"
+	@echo "  make test-live    Ejecuta los tests y evals con LLM real (consume tokens)"
 	@echo "  make opa-up       Levanta solo la política OPA (PDP) en localhost:8181"
 	@echo "  make attack       Ejecuta y narra el escenario 3.1 (LLM real; levanta OPA)"
 	@echo "  make attack-n N=5 Repite el escenario N veces y reporta tasas"
@@ -74,13 +75,15 @@ logs:
 ps:
 	$(DOCKER_COMPOSE) ps
 
+# Suite offline: sin red ni credenciales. Los tests que llaman a un LLM real llevan el marker requires_live_llm.
 test:
-	@echo "🧪 Ejecutando tests automatizados..."
-	@if [ -f backend/.venv/bin/pytest ]; then \
-		backend/.venv/bin/pytest backend/tests -v; \
-	else \
-		pytest backend/tests -v; \
-	fi
+	@echo "🧪 Ejecutando tests automatizados (offline)..."
+	$(PYTHON) -m pytest backend/tests -m "not requires_live_llm" -v
+
+# Evals y tests con LLM real (consumen tokens): requieren credenciales; sin ellas se omiten.
+test-live:
+	@echo "🧪 Ejecutando tests con LLM real (consumen tokens)..."
+	$(PYTHON) -m pytest backend/tests -m requires_live_llm -v
 
 opa-up:
 	@echo "🛡️  Levantando OPA (PDP) en http://localhost:8181 ..."

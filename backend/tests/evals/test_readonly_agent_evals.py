@@ -21,27 +21,15 @@ from langsmith import Client, traceable
 from mcp_financial_action_server.storage import financial_storage
 
 from app.config import settings
-from app.core.llm import get_chat_model
 from app.core.telemetry import build_trace_config
 from app.graph.nodes.readonly_agent import readonly_agent_node
 from app.graph.state import AgentState
+from tests.live_llm import live_llm_marks
 
 logger = logging.getLogger(__name__)
 
 
-# Check whether real LLM provider credentials are present
-def is_live_llm_available() -> bool:
-    try:
-        model = get_chat_model()
-        return model is not None
-    except Exception:
-        return False
-
-
-pytestmark = pytest.mark.skipif(
-    not is_live_llm_available(),
-    reason="Requiere credenciales válidas para el proveedor LLM configurado (Groq, Gemini, NVIDIA, etc.)",
-)
+pytestmark = live_llm_marks
 
 
 @pytest.fixture(autouse=True)
