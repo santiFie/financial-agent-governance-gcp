@@ -49,7 +49,7 @@ spec:
             secretKeyRef:
               name: token-vault-secret
               key: latest
-        # Real Model Armor template (docs/gcp_deployment_and_iam.md, section 3.b)
+        # Real Model Armor template (docs/gcp_deployment_and_iam.md, section 2.4)
         - name: USE_GCP_MODEL_ARMOR
           value: "true"
         - name: MODEL_ARMOR_TEMPLATE_ID

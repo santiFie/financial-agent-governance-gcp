@@ -8,7 +8,7 @@
 #
 #   1. APIs: Cloud DLP, Vertex AI, Firestore, Model Armor, Cloud Storage
 #   2. Base Firestore (default) en modo nativo           -> checkpointer de LangGraph
-#   3. Plantilla Model Armor "aegisbank-template"        -> filtro de prompt injection / jailbreak
+#   3. Plantilla Model Armor "fin-template"        -> filtro de prompt injection / jailbreak
 #   4. Bucket GCS con el comprobante del ataque          -> variante "documento desde un bucket"
 #   5. (opcional, --with-sa) Service Account de mínimo privilegio para un futuro Cloud Run
 #   6. .env.gcp (gitignored) con toda la configuración y un TOKEN_VAULT_SECRET propio
@@ -32,7 +32,7 @@ cd "$ROOT_DIR"
 
 PROJECT_ID=""
 REGION="us-central1"
-TEMPLATE_ID="aegisbank-template"
+TEMPLATE_ID="fin-template"
 ENV_FILE=".env.gcp"
 ASSUME_YES=0
 DRY_RUN=0
@@ -100,7 +100,7 @@ if [ -z "$PROJECT_ID" ] && [ "$DRY_RUN" -eq 0 ]; then
 fi
 [ -n "$PROJECT_ID" ] && [ "$PROJECT_ID" != "(unset)" ] || die "Indicá el proyecto: --project <ID> (o gcloud config set project <ID>)."
 
-BUCKET="${PROJECT_ID}-aegisbank-docs"
+BUCKET="${PROJECT_ID}-fin-docs"
 info "Cuenta : $ACCOUNT"
 info "Proyecto: $PROJECT_ID   Región: $REGION"
 info "Crea (si no existen): APIs, Firestore (default) en $REGION [ubicación IRREVERSIBLE], plantilla Model Armor"

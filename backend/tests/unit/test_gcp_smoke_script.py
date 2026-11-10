@@ -64,7 +64,7 @@ def test_bootstrap_forces_gcp_configuration_and_uses_explicit_project(smoke, mon
         "vertexai",
         "firestore",
     )
-    assert env["USE_GCP_MODEL_ARMOR"] == "true" and env["MODEL_ARMOR_TEMPLATE_ID"] == "aegisbank-template"
+    assert env["USE_GCP_MODEL_ARMOR"] == "true" and env["MODEL_ARMOR_TEMPLATE_ID"] == "fin-template"
 
 
 def test_resolve_project_ignores_placeholders_and_falls_back_to_gcloud(smoke, monkeypatch):

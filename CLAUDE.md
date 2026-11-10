@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-AegisBank AI: a multi-agent banking assistant (FastAPI + LangGraph backend, React/Vite frontend, FastMCP action server) built around "governance and defense": security is enforced by deterministic code layers and GCP infrastructure, never by prompt instructions alone. Docs, prompts, and user-facing strings are in Spanish (Argentine banking domain: CBU/CVU, alias, DNI, ARS).
+PoC (not a real system, no commercial name): a multi-agent financial assistant (FastAPI + LangGraph backend, React/Vite frontend, FastMCP action server) built around "governance and defense": security is enforced by deterministic code layers and GCP infrastructure, never by prompt instructions alone. Docs, prompts, and user-facing strings are in Spanish (Argentine banking domain: CBU/CVU, alias, DNI, ARS).
 
 ## PoC purpose: Threat 3.1 (Goal Hijacking / Confused Deputy)
 
